@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from app.api import health
 from fastapi.middleware.cors import CORSMiddleware
-
+from app.api.v1 import auth
 
 # Instantiate the web app
 app = FastAPI(
@@ -9,6 +9,9 @@ app = FastAPI(
     version="0.0.1",
     docs_url="/docs"
 )
+
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+
 
 # configure CORS (Cross-Origin Resource Sharing) middleware
 app.add_middleware(

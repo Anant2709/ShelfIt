@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16
+    container_name: grocery-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: grocery
+      POSTGRES_PASSWORD: grocerypw
+      POSTGRES_DB: grocery
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+
+volumes:
+  pgdata:
