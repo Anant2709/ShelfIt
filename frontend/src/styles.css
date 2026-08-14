@@ -1,0 +1,149 @@
+body {
+  font-family: "Inter", system-ui, sans-serif;
+  margin: 0;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.app {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 32px 16px 60px;
+  display: grid;
+  gap: 20px;
+}
+
+header h1 {
+  margin: 0;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 1px 6px rgba(15, 23, 42, 0.08);
+  display: grid;
+  gap: 12px;
+}
+
+.card input,
+.card textarea,
+.card button,
+.card select {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #cbd5f5;
+  font-size: 14px;
+}
+
+.card button {
+  background: #0ea5e9;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+}
+
+.card button:hover {
+  background: #0284c7;
+}
+
+.status {
+  background: #e2e8f0;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.chat-reply {
+  background: #f1f5f9;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.inventory-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.edit-row {
+  flex-wrap: wrap;
+}
+
+.inventory-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.form-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.camera-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.camera-preview {
+  width: 100%;
+  min-height: 360px;
+  max-height: 520px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  object-fit: cover;
+  background: #f1f5f9;
+}
+
+.label-review {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px dashed #cbd5f5;
+  background: #f8fafc;
+}
+
+.label-review-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.card ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.card li {
+  padding: 8px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.ghost-button {
+  background: transparent;
+  border: 1px solid #cbd5f5;
+  color: #0f172a;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.ghost-button:hover {
+  background: #e2e8f0;
+}

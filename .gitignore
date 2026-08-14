@@ -1,0 +1,41 @@
+# Secrets
+backend/.env
+.env
+
+# Databases
+*.db
+*.db-journal
+
+# User uploads and generated training data
+data/uploads/
+data/training/
+
+# Model weights and training artifacts
+data/model.pt
+*.pt
+backend/runs/
+
+# Datasets (re-downloadable via backend/scripts/train_yolo.py)
+backend/Groceries-1/
+**/Groceries-*/
+
+# Python
+**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Interview prep material (not part of the project)
+Intuit Prep/
+
+# OS
+.DS_Store
+
+# Vite temp files
+vite.config.js.timestamp-*

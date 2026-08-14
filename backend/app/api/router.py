@@ -1,0 +1,7 @@
+from fastapi import APIRouter
+
+from app.api.endpoints import chat, inventory
+
+api_router = APIRouter()
+api_router.include_router(inventory.router, tags=["inventory"], prefix="/inventory")
+api_router.include_router(chat.router, tags=["chat"], prefix="/chat")
