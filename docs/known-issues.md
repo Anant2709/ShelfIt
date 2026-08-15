@@ -46,9 +46,15 @@ the result `source="api"`. That reads as "a data provider told us five days" whe
 it means "something we asked confirmed this is food, so we guessed." It is why
 sugar and cooking oil are both assigned five days.
 
+Now that external resolutions are cached, this misleading label is also
+*persisted* for 30 days, which raises the stakes slightly: a wrong value used to
+be recomputed, and now it sticks. The cache namespace is versioned
+(`shelf_life_external_v1`) precisely so fixing the logic can invalidate every
+previously stored answer.
+
 **Fix direction:** either drop the tier, or relabel it honestly and let the
 assistant estimate a shelf life for unresolved items with its own provenance
-value and a cache.
+value.
 
 ### No schema migrations
 
@@ -77,19 +83,28 @@ baked into every query rather than a feature flag.
 `status` string, so concurrent operations overwrite each other's feedback and
 nothing can be dismissed independently.
 
-### Uploaded filenames are not sanitised
+## Fixed
 
-`scan_item()` and `upload_image()` interpolate `file.filename` into a path without
-taking its basename. The label endpoint *does* defend itself with `Path(...).name`,
-and there is a test proving traversal is neutralised there, but the upload paths
-do not have the same guard.
+### Uploaded filenames were not sanitised
+
+**Fixed in:** the caching commit
+
+`scan_item()` and `upload_image()` interpolated the client-supplied
+`file.filename` into a path without reducing it to a basename, so a name
+containing `../` could write outside the uploads directory. Both paths now share
+a single `_persist_upload()` helper that applies `Path(...).name`, and a test
+uploads `../../../../tmp/escaped.png` to prove the file lands inside the uploads
+directory.
 
 ### Deprecated UTC handling
 
-`datetime.utcnow()` is used for timestamps and upload filenames. Deprecated in
-Python 3.12+; should be `datetime.now(timezone.utc)`.
+**Fixed in:** the caching commit
 
-## Fixed
+`datetime.utcnow()` is deprecated from Python 3.12. Replaced by
+`app/core/clock.py`, which also fixes a latent bug: the previous
+`datetime.utcnow().timestamp()` spelling used for upload filenames interpreted a
+naive UTC value as local time, so it was wrong by the local UTC offset.
+`epoch_seconds()` returns a true POSIX timestamp.
 
 ### Expiration write succeeded but returned 500
 

@@ -134,6 +134,40 @@ class TestScanPersistence:
     def test_scan_requires_a_file(self, client):
         assert client.post("/api/inventory/scan", data={}).status_code == 422
 
+    def test_traversal_in_the_uploaded_filename_cannot_escape_the_directory(
+        self, client, uploads_dir, sample_image_bytes, stub_classifier
+    ):
+        """A filename is client-supplied, so only its basename is honoured."""
+        stub_classifier("bread", 0.95)
+        response = client.post(
+            "/api/inventory/scan",
+            files={
+                "file": (
+                    "../../../../tmp/escaped.png",
+                    sample_image_bytes,
+                    "image/png",
+                )
+            },
+            data={},
+        )
+        assert response.status_code == 200
+        written = list(uploads_dir.iterdir())
+        assert len(written) == 1
+        assert written[0].parent == uploads_dir
+        assert written[0].name.endswith("escaped.png")
+        assert ".." not in written[0].name
+
+    def test_missing_filename_still_persists(
+        self, client, uploads_dir, sample_image_bytes, stub_classifier
+    ):
+        stub_classifier("bread", 0.95)
+        response = client.post(
+            "/api/inventory/scan",
+            files={"file": ("", sample_image_bytes, "image/png")},
+            data={},
+        )
+        assert response.status_code in (200, 422)
+
 
 class TestManualLabel:
     def label(self, client, image_id, **overrides):

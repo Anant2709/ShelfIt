@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     model_path: str = str(DATA_DIR / "model.pt")
     model_confidence_threshold: float = 0.7
+    # "sql" persists across restarts, which matters because `uvicorn --reload`
+    # would otherwise discard paid lookup results on every code change.
+    cache_backend: str = "sql"
+    cache_ttl_days: int = 30
     roboflow_api_key: str | None = None
     roboflow_workspace: str | None = None
     roboflow_project: str | None = None

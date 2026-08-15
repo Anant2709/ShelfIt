@@ -4,7 +4,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import settings
 from app.db.session import engine
-from app.models.base import Base
+
+# Imports the model package rather than just Base, so every table is registered
+# on the metadata before create_all runs.
+from app.models import Base
 
 Base.metadata.create_all(bind=engine)
 

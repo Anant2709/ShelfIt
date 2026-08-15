@@ -11,3 +11,6 @@ show_missing = True
 exclude_lines =
     pragma: no cover
     if __name__ == .__main__.:
+    # Protocol method stubs have no executable body.
+    ^\s*\.\.\.$
+    ^\s*def .*\) -> .*: \.\.\.$

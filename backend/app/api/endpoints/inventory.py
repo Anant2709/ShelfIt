@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 import json
 import shutil
 from pathlib import Path
@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from app.core.clock import epoch_seconds, utcnow
 from app.core.config import settings
 from app.db.deps import get_db
 from app.models.inventory import Expiration, InventoryItem
@@ -22,6 +23,22 @@ from app.services.classifier import classify_image
 from app.services.shelf_life import lookup_shelf_life_days
 
 router = APIRouter()
+
+
+def _persist_upload(file: UploadFile) -> Path:
+    """Save an uploaded image and return where it landed.
+
+    The stored name is prefixed with a timestamp so two uploads of the same
+    filename cannot overwrite each other, and reduced to its basename because a
+    client-supplied filename may contain path separators.
+    """
+    upload_dir = Path(settings.upload_dir)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(file.filename or "upload").name
+    file_path = upload_dir / f"{epoch_seconds()}_{safe_name}"
+    with file_path.open("wb") as handle:
+        handle.write(file.file.read())
+    return file_path
 
 
 @router.post("/", response_model=InventoryItemOut)
@@ -107,11 +124,7 @@ def scan_item(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    upload_dir = Path(settings.upload_dir)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    file_path = upload_dir / f"{datetime.utcnow().timestamp()}_{file.filename}"
-    with file_path.open("wb") as handle:
-        handle.write(file.file.read())
+    file_path = _persist_upload(file)
 
     label, confidence = classify_image(file_path)
 
@@ -148,11 +161,7 @@ def upload_image(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    upload_dir = Path(settings.upload_dir)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    file_path = upload_dir / f"{datetime.utcnow().timestamp()}_{file.filename}"
-    with file_path.open("wb") as handle:
-        handle.write(file.file.read())
+    file_path = _persist_upload(file)
 
     label, confidence = classify_image(file_path)
     item.image_uri = str(file_path)
@@ -203,7 +212,7 @@ def label_item(payload: InventoryLabelRequest, db: Session = Depends(get_db)):
         "label": payload.label,
         "source_path": str(file_path),
         "training_path": str(target_path),
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": utcnow().isoformat(),
     }
     with manifest_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record) + "\n")

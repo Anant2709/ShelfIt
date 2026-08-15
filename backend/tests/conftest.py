@@ -68,6 +68,25 @@ def client(db):
 
 
 @pytest.fixture(autouse=True)
+def isolated_cache(monkeypatch):
+    """Disable caching by default and reset every module-level cache.
+
+    Without this, a value cached by one test would be visible to the next, and
+    the suite would pass or fail depending on execution order. Tests that
+    exercise caching opt in by constructing a real backend and passing it in.
+    """
+    from app.services import cache as cache_module
+    from app.services import shelf_life as shelf_life_module
+
+    cache_module.reset_cache()
+    shelf_life_module.reset_dataset_cache()
+    monkeypatch.setattr(cache_module.settings, "cache_backend", "none")
+    yield
+    cache_module.reset_cache()
+    shelf_life_module.reset_dataset_cache()
+
+
+@pytest.fixture(autouse=True)
 def block_outbound_http(monkeypatch):
     """Fail loudly if a test makes a real outbound HTTP call via requests.
 

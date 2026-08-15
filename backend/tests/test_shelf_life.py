@@ -12,6 +12,7 @@ import pytest
 
 from app.core import config
 from app.services import shelf_life
+from app.services.cache import InMemoryCache
 from app.services.shelf_life import (
     _heuristic_fallback,
     _normalize_name,
@@ -212,3 +213,114 @@ class TestTierOrdering:
 
 def test_normalize_name():
     assert _normalize_name("  Whole Milk ") == "whole milk"
+
+
+class TestCaching:
+    """The cache exists to stop paid lookups repeating, including for unknowns."""
+
+    @pytest.fixture
+    def counting_api(self, monkeypatch):
+        """Records how many times the external service is actually called."""
+        monkeypatch.setattr(config.settings, "shelf_life_api_key", "test-key")
+        calls = []
+
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"results": [{"name": "paneer"}]}
+
+        def _get(*args, **kwargs):
+            calls.append(kwargs.get("params", {}).get("query"))
+            return FakeResponse()
+
+        monkeypatch.setattr(shelf_life.requests, "get", _get)
+        return calls
+
+    def test_repeated_lookup_calls_the_api_once(
+        self, no_dataset, counting_api
+    ):
+        cache = InMemoryCache()
+        first = lookup_shelf_life_days("paneer", cache=cache)
+        second = lookup_shelf_life_days("paneer", cache=cache)
+        assert first == second == (5, "api")
+        assert len(counting_api) == 1, "second lookup should have been served warm"
+        assert cache.stats.hits == 1
+
+    def test_unresolvable_name_is_only_resolved_once(self, no_dataset):
+        """Negative caching. Unknowns cost the same to resolve as knowns."""
+        cache = InMemoryCache()
+        assert lookup_shelf_life_days("saffron", cache=cache) == (None, "unknown")
+        assert lookup_shelf_life_days("saffron", cache=cache) == (None, "unknown")
+        assert cache.stats.hits == 1
+        assert cache.stats.writes == 1
+
+    def test_lookup_is_case_insensitive_for_cache_purposes(
+        self, no_dataset, counting_api
+    ):
+        cache = InMemoryCache()
+        lookup_shelf_life_days("Paneer", cache=cache)
+        lookup_shelf_life_days("  PANEER  ", cache=cache)
+        assert len(counting_api) == 1, "normalised names should share a cache entry"
+
+    def test_dataset_hits_never_touch_the_cache(self, dataset):
+        """Local file reads are already cheap; caching them would mask edits."""
+        dataset({"milk": 5})
+        cache = InMemoryCache()
+        assert lookup_shelf_life_days("milk", cache=cache) == (5, "dataset")
+        assert cache.stats.lookups == 0
+        assert cache.stats.writes == 0
+
+    def test_cached_provenance_is_preserved(self, no_dataset, counting_api):
+        cache = InMemoryCache()
+        lookup_shelf_life_days("paneer", cache=cache)
+        _, source = lookup_shelf_life_days("paneer", cache=cache)
+        assert source == "api", "a warm read must not lose how the value was obtained"
+
+    def test_expired_cache_entry_triggers_a_fresh_lookup(
+        self, no_dataset, counting_api, monkeypatch
+    ):
+        monkeypatch.setattr(config.settings, "cache_ttl_days", -1)
+        cache = InMemoryCache()
+        lookup_shelf_life_days("paneer", cache=cache)
+        lookup_shelf_life_days("paneer", cache=cache)
+        assert len(counting_api) == 2
+
+    def test_falls_back_to_the_process_cache_when_none_is_passed(self, no_dataset):
+        """Callers may omit the cache; the module resolves one itself."""
+        assert lookup_shelf_life_days("saffron") == (None, "unknown")
+
+
+class TestDatasetFileMemoisation:
+    def test_file_is_parsed_once_for_repeated_lookups(self, dataset, monkeypatch):
+        dataset({"milk": 5})
+        loads = []
+        original = json.load
+
+        def counting_load(handle):
+            loads.append(1)
+            return original(handle)
+
+        monkeypatch.setattr(shelf_life.json, "load", counting_load)
+        for _ in range(5):
+            lookup_shelf_life_days("milk")
+        assert len(loads) == 1, "dataset should be read from disk once"
+
+    def test_editing_the_file_invalidates_the_memoised_copy(self, dataset):
+        """Keyed on mtime so development edits take effect without a restart."""
+        path = dataset({"milk": 5})
+        assert lookup_shelf_life_days("milk") == (5, "dataset")
+
+        import os
+        import time
+
+        path.write_text(json.dumps({"milk": 9}), encoding="utf-8")
+        # Force a distinct mtime; filesystem granularity can otherwise collide.
+        future = time.time() + 10
+        os.utime(path, (future, future))
+
+        assert lookup_shelf_life_days("milk") == (9, "dataset")
+
+    def test_missing_file_yields_an_empty_dataset(self, no_dataset):
+        assert shelf_life._load_dataset() == {}
