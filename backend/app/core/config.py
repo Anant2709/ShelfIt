@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     model_path: str = str(DATA_DIR / "model.pt")
     model_confidence_threshold: float = 0.7
+    # "vision_llm" recognises arbitrary groceries; "yolo" uses local weights and
+    # needs requirements-ml.txt; "null" detects nothing.
+    classifier_backend: str = "vision_llm"
+    vision_model: str = "gpt-4o-mini"
+    max_detections_per_image: int = 10
     # "sql" persists across restarts, which matters because `uvicorn --reload`
     # would otherwise discard paid lookup results on every code change.
     cache_backend: str = "sql"

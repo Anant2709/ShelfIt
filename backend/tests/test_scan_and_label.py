@@ -12,16 +12,38 @@ import pytest
 from app.api.endpoints import inventory as inventory_endpoint
 from app.core import config
 from app.models.inventory import InventoryItem
+from app.services.classifier import Detection
 
 
 @pytest.fixture
 def stub_classifier(monkeypatch):
-    """Replace the vision model with a deterministic stub."""
+    """Replace the vision model with a deterministic stub.
 
-    def _stub(label: str, confidence: float):
+    Accepts either a single `(label, confidence)` pair or several, so tests can
+    describe both a one-item photo and a whole shelf.
+    """
+
+    def _stub(*args):
+        if len(args) == 2 and isinstance(args[0], str):
+            pairs = [(args[0], args[1])]
+        else:
+            pairs = list(args)
+        detections = [
+            value
+            if isinstance(value, Detection)
+            else Detection(label=value[0], confidence=value[1])
+            for value in pairs
+        ]
         monkeypatch.setattr(
-            inventory_endpoint, "classify_image", lambda path: (label, confidence)
+            inventory_endpoint, "detect_items", lambda path: list(detections)
         )
+        # Some endpoints act on a single best guess rather than the full list.
+        top = (
+            (detections[0].label, detections[0].confidence)
+            if detections
+            else ("unknown", 0.0)
+        )
+        monkeypatch.setattr(inventory_endpoint, "classify_image", lambda path: top)
 
     return _stub
 
@@ -167,6 +189,127 @@ class TestScanPersistence:
             data={},
         )
         assert response.status_code in (200, 422)
+
+
+class TestMultiItemScan:
+    """One photograph of a shelf should log the whole shelf."""
+
+    def test_several_confident_detections_create_several_items(
+        self, client, db, uploads_dir, sample_image_bytes, stub_classifier
+    ):
+        stub_classifier(("milk", 0.95), ("bread", 0.91), ("eggs", 0.88))
+        body = post_scan(client, sample_image_bytes).json()
+        assert body["status"] == "created"
+        assert [item["name"] for item in body["created_items"]] == [
+            "milk",
+            "bread",
+            "eggs",
+        ]
+        assert db.query(InventoryItem).count() == 3
+
+    def test_each_created_item_gets_its_own_expiration(
+        self, client, uploads_dir, sample_image_bytes, stub_classifier, monkeypatch
+    ):
+        monkeypatch.setattr(
+            inventory_endpoint, "lookup_shelf_life_days", lambda name: (4, "dataset")
+        )
+        stub_classifier(("milk", 0.95), ("bread", 0.91))
+        body = post_scan(client, sample_image_bytes).json()
+        for item in body["created_items"]:
+            assert item["expiration"]["expiration_date"] == str(
+                date.today() + timedelta(days=4)
+            )
+
+    def test_mixed_confidence_splits_created_from_candidates(
+        self, client, db, uploads_dir, sample_image_bytes, stub_classifier
+    ):
+        """Confident items are added; the rest come back for confirmation."""
+        stub_classifier(("milk", 0.95), ("mystery jar", 0.31))
+        body = post_scan(client, sample_image_bytes).json()
+        assert body["status"] == "created"
+        assert [item["name"] for item in body["created_items"]] == ["milk"]
+        assert [c["label"] for c in body["candidates"]] == ["mystery jar"]
+        assert db.query(InventoryItem).count() == 1
+
+    def test_all_uncertain_detections_ask_for_labels(
+        self, client, db, uploads_dir, sample_image_bytes, stub_classifier
+    ):
+        stub_classifier(("thing a", 0.4), ("thing b", 0.2))
+        body = post_scan(client, sample_image_bytes).json()
+        assert body["status"] == "needs_label"
+        assert body["created_items"] == []
+        assert len(body["candidates"]) == 2
+        assert db.query(InventoryItem).count() == 0
+
+    def test_nothing_recognised_reports_empty(
+        self, client, db, uploads_dir, sample_image_bytes, stub_classifier
+    ):
+        """Distinct from 'needs_label': there is nothing to offer the user."""
+        stub_classifier()
+        body = post_scan(client, sample_image_bytes).json()
+        assert body["status"] == "empty"
+        assert body["created_items"] == []
+        assert body["candidates"] == []
+        assert db.query(InventoryItem).count() == 0
+
+    def test_duplicate_detections_create_separate_items(
+        self, client, db, uploads_dir, sample_image_bytes, stub_classifier
+    ):
+        """Two cartons of milk are two items, not one."""
+        stub_classifier(("milk", 0.95), ("milk", 0.95))
+        body = post_scan(client, sample_image_bytes).json()
+        assert len(body["created_items"]) == 2
+        assert db.query(InventoryItem).count() == 2
+
+    def test_bounding_boxes_are_surfaced_on_candidates(
+        self, client, uploads_dir, sample_image_bytes, stub_classifier
+    ):
+        stub_classifier(Detection("mystery", 0.3, box=(1.0, 2.0, 3.0, 4.0)))
+        body = post_scan(client, sample_image_bytes).json()
+        assert body["candidates"][0]["box"] == [1.0, 2.0, 3.0, 4.0]
+
+    def test_every_created_item_shares_the_source_image(
+        self, client, uploads_dir, sample_image_bytes, stub_classifier
+    ):
+        stub_classifier(("milk", 0.95), ("bread", 0.91))
+        body = post_scan(client, sample_image_bytes).json()
+        image_uris = {item["image_uri"] for item in body["created_items"]}
+        assert len(image_uris) == 1
+
+    def test_image_id_is_always_returned(
+        self, client, uploads_dir, sample_image_bytes, stub_classifier
+    ):
+        """Needed by the label endpoint even when nothing was created."""
+        stub_classifier(("thing", 0.1))
+        assert post_scan(client, sample_image_bytes).json()["image_id"]
+
+
+class TestLegacySingleItemView:
+    """`item`, `suggested_label`, and `confidence` are a convenience view."""
+
+    def test_item_mirrors_the_first_created_item(
+        self, client, uploads_dir, sample_image_bytes, stub_classifier
+    ):
+        stub_classifier(("milk", 0.95), ("bread", 0.91))
+        body = post_scan(client, sample_image_bytes).json()
+        assert body["item"]["name"] == body["created_items"][0]["name"] == "milk"
+
+    def test_suggested_label_mirrors_the_first_candidate(
+        self, client, uploads_dir, sample_image_bytes, stub_classifier
+    ):
+        stub_classifier(("mystery", 0.33))
+        body = post_scan(client, sample_image_bytes).json()
+        assert body["suggested_label"] == "mystery"
+        assert body["confidence"] == pytest.approx(0.33)
+
+    def test_no_candidates_reports_unknown_at_zero(
+        self, client, uploads_dir, sample_image_bytes, stub_classifier
+    ):
+        stub_classifier(("milk", 0.95))
+        body = post_scan(client, sample_image_bytes).json()
+        assert body["suggested_label"] == "unknown"
+        assert body["confidence"] == 0.0
+        assert body["item"] is not None
 
 
 class TestManualLabel:

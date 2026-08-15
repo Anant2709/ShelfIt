@@ -18,8 +18,14 @@ from app.schemas.inventory import (
     InventoryItemOut,
     InventoryScanResponse,
     InventoryItemUpdate,
+    ScanCandidate,
 )
-from app.services.classifier import classify_image
+from app.services.classifier import (
+    UNKNOWN_LABEL,
+    Detection,
+    classify_image,
+    detect_items,
+)
 from app.services.shelf_life import lookup_shelf_life_days
 
 router = APIRouter()
@@ -125,32 +131,64 @@ def scan_item(
     db: Session = Depends(get_db),
 ):
     file_path = _persist_upload(file)
+    detections = detect_items(file_path)
 
-    label, confidence = classify_image(file_path)
-
-    if confidence < settings.model_confidence_threshold or label == "unknown":
-        return InventoryScanResponse(
-            status="needs_label",
-            image_id=file_path.name,
-            suggested_label=label,
-            confidence=confidence,
+    # Split on the confidence gate. Anything the model is sure about is added
+    # directly; anything else is handed back for the user to confirm, so low
+    # confidence can never quietly corrupt the inventory. Partitioned in a single
+    # pass rather than by membership test, because two identical detections would
+    # otherwise both be treated as the same entry.
+    confident: list[Detection] = []
+    uncertain: list[Detection] = []
+    for detection in detections:
+        is_usable = (
+            detection.confidence >= settings.model_confidence_threshold
+            and detection.label != UNKNOWN_LABEL
         )
+        (confident if is_usable else uncertain).append(detection)
 
-    item = InventoryItem(
-        name=label,
-        category=None,
-        quantity=quantity,
-        unit=unit,
-        image_uri=str(file_path),
-        confidence=confidence,
+    created: list[InventoryItem] = []
+    for detection in confident:
+        item = InventoryItem(
+            name=detection.label,
+            category=None,
+            quantity=quantity,
+            unit=unit,
+            image_uri=str(file_path),
+            confidence=detection.confidence,
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        _ensure_expiration(item, expiration_date, db)
+        db.refresh(item)
+        created.append(item)
+
+    candidates = [
+        ScanCandidate(
+            label=detection.label,
+            confidence=detection.confidence,
+            box=list(detection.box) if detection.box else None,
+        )
+        for detection in uncertain
+    ]
+
+    if created:
+        status = "created"
+    elif candidates:
+        status = "needs_label"
+    else:
+        status = "empty"
+
+    return InventoryScanResponse(
+        status=status,
+        image_id=file_path.name,
+        created_items=created,
+        candidates=candidates,
+        item=created[0] if created else None,
+        suggested_label=candidates[0].label if candidates else UNKNOWN_LABEL,
+        confidence=candidates[0].confidence if candidates else 0.0,
     )
-    db.add(item)
-    db.commit()
-    db.refresh(item)
-
-    _ensure_expiration(item, expiration_date, db)
-    db.refresh(item)
-    return InventoryScanResponse(status="created", item=item)
 
 
 @router.post("/{item_id}/image", response_model=InventoryItemOut)

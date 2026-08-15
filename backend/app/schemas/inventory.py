@@ -47,10 +47,32 @@ class InventoryItemOut(InventoryItemBase):
         from_attributes = True
 
 
+class ScanCandidate(BaseModel):
+    """A detection the model was not confident enough to add automatically."""
+
+    label: str
+    confidence: float
+    box: list[float] | None = None
+
+
 class InventoryScanResponse(BaseModel):
-    status: Literal["created", "needs_label"]
-    item: InventoryItemOut | None = None
+    """The outcome of one scan, which may cover several items.
+
+    `status` summarises the scan for callers that only act on one outcome:
+      created     at least one item was added automatically
+      needs_label nothing was confident enough; the user must name it
+      empty       nothing recognisable was found
+
+    `item`, `suggested_label`, and `confidence` describe the first created item
+    and the first candidate respectively. They are a convenience view over
+    `created_items` and `candidates`, which are the authoritative lists.
+    """
+
+    status: Literal["created", "needs_label", "empty"]
     image_id: str | None = None
+    created_items: list[InventoryItemOut] = Field(default_factory=list)
+    candidates: list[ScanCandidate] = Field(default_factory=list)
+    item: InventoryItemOut | None = None
     suggested_label: str | None = None
     confidence: float | None = None
 
