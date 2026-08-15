@@ -200,6 +200,23 @@ class TestChatEndpoint:
         messages = fake.last_instance.chat.completions.calls[0]["messages"]
         assert "Paneer 200.0 g" in messages[1]["content"]
 
+    def test_endpoint_does_not_ground_on_resolved_items(
+        self, client, fake_openai
+    ):
+        fake = fake_openai()
+        created = client.post(
+            "/api/inventory/",
+            json={"name": "Paneer", "quantity": 200, "unit": "g"},
+        ).json()
+        client.post(
+            f"/api/inventory/{created['id']}/dispositions",
+            json={"outcome": "consumed"},
+        )
+        client.post("/api/chat/", json={"message": "ideas?"})
+        messages = fake.last_instance.chat.completions.calls[0]["messages"]
+        assert "Inventory is empty." in messages[1]["content"]
+        assert "Paneer" not in messages[1]["content"]
+
     def test_empty_inventory_still_produces_a_grounded_prompt(
         self, client, fake_openai
     ):

@@ -223,3 +223,5 @@ def test_item_model_defaults(db):
     assert item.unit == "count"
     assert item.created_at is not None
     assert item.category is None
+    assert item.resolved_at is None
+    assert item.is_resolved is False

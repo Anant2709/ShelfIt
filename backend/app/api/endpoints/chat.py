@@ -15,7 +15,11 @@ router = APIRouter()
 
 @router.post("/", response_model=ChatResponse)
 def chat(payload: ChatRequest, db: Session = Depends(get_db)):
-    items = db.query(InventoryItem).all()
+    items = (
+        db.query(InventoryItem)
+        .filter(InventoryItem.resolved_at.is_(None))
+        .all()
+    )
     inventory_snapshot = []
     for item in items:
         inventory_snapshot.append(

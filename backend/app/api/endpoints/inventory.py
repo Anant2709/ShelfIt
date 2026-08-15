@@ -9,8 +9,11 @@ from sqlalchemy.orm import Session
 from app.core.clock import epoch_seconds, utcnow
 from app.core.config import settings
 from app.db.deps import get_db
-from app.models.inventory import Expiration, InventoryItem
+from app.models.inventory import Disposition, Expiration, InventoryItem
 from app.schemas.inventory import (
+    DispositionCreate,
+    DispositionOut,
+    DispositionResult,
     ExpirationCreate,
     ExpirationOut,
     InventoryLabelRequest,
@@ -21,6 +24,12 @@ from app.schemas.inventory import (
     ReminderEntry,
     RemindersResponse,
     ScanCandidate,
+)
+from app.services.disposition import (
+    AlreadyResolvedError,
+    DispositionError,
+    ExcessQuantityError,
+    apply_disposition,
 )
 from app.services.classifier import (
     UNKNOWN_LABEL,
@@ -67,8 +76,14 @@ def create_item(payload: InventoryItemCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/", response_model=list[InventoryItemOut])
-def list_items(db: Session = Depends(get_db)):
-    return db.query(InventoryItem).all()
+def list_items(
+    include_resolved: bool = False,
+    db: Session = Depends(get_db),
+):
+    query = db.query(InventoryItem)
+    if not include_resolved:
+        query = query.filter(InventoryItem.resolved_at.is_(None))
+    return query.all()
 
 
 @router.get("/reminders", response_model=RemindersResponse)
@@ -90,6 +105,7 @@ def reminders(
     query = (
         db.query(InventoryItem, Expiration)
         .join(Expiration, InventoryItem.id == Expiration.item_id)
+        .filter(InventoryItem.resolved_at.is_(None))
         .filter(Expiration.expiration_date.isnot(None))
         .filter(Expiration.expiration_date <= cutoff)
     )
@@ -120,6 +136,7 @@ def reminders(
     undated = (
         db.query(InventoryItem)
         .outerjoin(Expiration, InventoryItem.id == Expiration.item_id)
+        .filter(InventoryItem.resolved_at.is_(None))
         .filter(
             (Expiration.item_id.is_(None)) | (Expiration.expiration_date.is_(None))
         )
@@ -149,6 +166,10 @@ def update_item(item_id: str, payload: InventoryItemUpdate, db: Session = Depend
     item = db.get(InventoryItem, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+    if item.resolved_at is not None:
+        raise HTTPException(
+            status_code=409, detail="Resolved items cannot be edited"
+        )
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(item, field, value)
     db.add(item)
@@ -165,6 +186,48 @@ def delete_item(item_id: str, db: Session = Depends(get_db)):
     db.delete(item)
     db.commit()
     return {"status": "deleted"}
+
+
+@router.post("/{item_id}/dispositions", response_model=DispositionResult)
+def record_disposition(
+    item_id: str,
+    payload: DispositionCreate,
+    db: Session = Depends(get_db),
+):
+    item = db.get(InventoryItem, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    try:
+        event = apply_disposition(
+            db,
+            item,
+            outcome=payload.outcome,
+            quantity=payload.quantity,
+            reason=payload.reason,
+        )
+    except AlreadyResolvedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ExcessQuantityError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except DispositionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(item)
+    db.refresh(event)
+    return DispositionResult(disposition=event, item=item)
+
+
+@router.get("/{item_id}/dispositions", response_model=list[DispositionOut])
+def list_dispositions(item_id: str, db: Session = Depends(get_db)):
+    item = db.get(InventoryItem, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return (
+        db.query(Disposition)
+        .filter(Disposition.item_id == item_id)
+        .order_by(Disposition.occurred_at.asc())
+        .all()
+    )
 
 
 @router.post("/scan", response_model=InventoryScanResponse)
@@ -310,6 +373,10 @@ def set_expiration(
     item = db.get(InventoryItem, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+    if item.resolved_at is not None:
+        raise HTTPException(
+            status_code=409, detail="Resolved items cannot be edited"
+        )
     # merge() returns the session-managed instance; the transient one passed in
     # stays detached and cannot be refreshed.
     expiration = db.merge(

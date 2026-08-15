@@ -20,5 +20,7 @@ def test_expected_routes_are_registered(client):
         "/api/inventory/{item_id}",
         "/api/inventory/{item_id}/expiration",
         "/api/chat/",
+        "/api/analytics/waste",
+        "/api/inventory/{item_id}/dispositions",
     ]:
         assert expected in paths, f"missing route {expected}"

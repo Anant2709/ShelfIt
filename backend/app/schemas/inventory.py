@@ -23,12 +23,13 @@ class ExpirationOut(ExpirationBase):
 class InventoryItemBase(BaseModel):
     name: str
     category: str | None = None
-    quantity: float = Field(default=1.0, ge=0.01)
+    quantity: float = Field(default=1.0, ge=0)
     unit: str = Field(default="count")
 
 
 class InventoryItemCreate(InventoryItemBase):
     expiration_date: date | None = None
+    quantity: float = Field(default=1.0, ge=0.01)
 
 
 class InventoryItemUpdate(BaseModel):
@@ -43,10 +44,16 @@ class InventoryItemOut(InventoryItemBase):
     image_uri: str | None = None
     confidence: float | None = None
     created_at: datetime
+    resolved_at: datetime | None = None
     expiration: ExpirationOut | None = None
 
     class Config:
         from_attributes = True
+
+    @computed_field
+    @property
+    def is_resolved(self) -> bool:
+        return self.resolved_at is not None
 
     # Derived on the server so every client agrees, and so the rule can be
     # tested without a browser.
@@ -132,3 +139,37 @@ class InventoryLabelRequest(BaseModel):
     quantity: float = Field(default=1.0, ge=0.01)
     unit: str = Field(default="count")
     expiration_date: date | None = None
+
+
+class DispositionCreate(BaseModel):
+    """Record using or throwing out some or all of an item.
+
+    Omitting `quantity` disposes whatever is still on the shelf.
+    """
+
+    outcome: Literal["consumed", "wasted"]
+    quantity: float | None = Field(default=None, gt=0)
+    reason: str | None = None
+
+
+class DispositionOut(BaseModel):
+    id: str
+    item_id: str
+    outcome: Literal["consumed", "wasted"]
+    quantity: float
+    unit: str
+    reason: str | None = None
+    occurred_at: datetime
+    item_name: str
+    days_remaining: int | None = None
+    expiration_date: date | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class DispositionResult(BaseModel):
+    """The event plus the item as it now stands, so a client can update both."""
+
+    disposition: DispositionOut
+    item: InventoryItemOut
