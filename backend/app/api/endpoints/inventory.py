@@ -218,10 +218,18 @@ def set_expiration(
     item = db.get(InventoryItem, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    expiration = Expiration(
-        item_id=item_id, expiration_date=payload.expiration_date, source="user"
+    # merge() returns the session-managed instance; the transient one passed in
+    # stays detached and cannot be refreshed.
+    expiration = db.merge(
+        Expiration(
+            item_id=item_id,
+            expiration_date=payload.expiration_date,
+            source="user",
+            # An explicit date supersedes any previously inferred shelf life, so
+            # the row does not claim both a user source and an inferred duration.
+            shelf_life_days=None,
+        )
     )
-    db.merge(expiration)
     db.commit()
     db.refresh(expiration)
     return expiration

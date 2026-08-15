@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_db
 from app.models.inventory import InventoryItem
 from app.schemas.chat import ChatRequest, ChatResponse
-from app.services.chatbot import build_inventory_context, generate_chat_reply
+from app.services.chatbot import (
+    ChatUnavailableError,
+    build_inventory_context,
+    generate_chat_reply,
+)
 
 router = APIRouter()
 
@@ -25,5 +29,8 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
             }
         )
     context = build_inventory_context(inventory_snapshot)
-    reply = generate_chat_reply(payload.message, context)
+    try:
+        reply = generate_chat_reply(payload.message, context)
+    except ChatUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return ChatResponse(reply=reply)
