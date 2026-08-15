@@ -1,3 +1,9 @@
+# Core API runtime.
+#
+# Deliberately excludes the machine-learning stack: the classifier imports
+# ultralytics lazily and degrades to ("unknown", 0.0) when it is absent, so the
+# API boots and serves every endpoint without a ~2GB dependency tree.
+# Install requirements-ml.txt to enable local model inference.
 fastapi==0.115.6
 uvicorn==0.30.6
 sqlalchemy==2.0.36
@@ -6,9 +12,4 @@ pydantic==2.10.3
 pydantic-settings==2.7.0
 python-multipart==0.0.12
 requests==2.32.3
-torch==2.10.0
-torchvision==0.25.0
 openai==1.57.0
-pillow==10.4.0
-ultralytics==8.3.0
-roboflow==1.1.50

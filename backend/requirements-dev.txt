@@ -1,3 +1,5 @@
+# Test and lint tooling. Intentionally does not pull in requirements-ml.txt so
+# the suite stays fast and runnable in CI without the ML stack.
 -r requirements.txt
 
 pytest==9.1.1

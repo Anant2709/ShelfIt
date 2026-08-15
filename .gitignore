@@ -39,3 +39,6 @@ Intuit Prep/
 
 # Vite temp files
 vite.config.js.timestamp-*
+
+# Database backups
+*.db.backup-*

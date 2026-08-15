@@ -1,0 +1,9 @@
+# Optional local-inference stack for the YOLO classifier backend and training.
+# Only needed when CLASSIFIER_BACKEND=yolo or when running scripts/train_yolo.py.
+-r requirements.txt
+
+pillow==10.4.0
+torch==2.10.0
+torchvision==0.25.0
+ultralytics==8.3.0
+roboflow==1.1.50

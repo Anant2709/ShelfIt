@@ -1,0 +1,13 @@
+[run]
+branch = True
+omit =
+    tests/*
+    # Requires the optional ML stack and a live Roboflow account, so it is
+    # exercised manually rather than in CI.
+    scripts/train_yolo.py
+
+[report]
+show_missing = True
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:

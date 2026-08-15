@@ -10,10 +10,40 @@ import types
 from pathlib import Path
 
 import pytest
-import torch
 
 from app.services import classifier
 from app.services.classifier import classify_image
+
+
+class FakeScalar:
+    """Mimics a 0-d tensor, which the adapter reads through .item()."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def item(self):
+        return self._value
+
+
+class FakeTensor:
+    """Minimal stand-in for the tensor API the adapter actually touches.
+
+    Faking this instead of importing torch keeps the suite runnable without the
+    optional ML stack -- the same property that lets the API boot without it.
+    """
+
+    def __init__(self, values):
+        self._values = list(values)
+
+    def __len__(self):
+        return len(self._values)
+
+    def __getitem__(self, index):
+        return FakeScalar(self._values[index])
+
+    def argmax(self):
+        best = max(range(len(self._values)), key=lambda i: self._values[i])
+        return FakeScalar(best)
 
 
 class FakeProbs:
@@ -24,8 +54,8 @@ class FakeProbs:
 
 class FakeBoxes:
     def __init__(self, conf: list[float], cls: list[int]):
-        self.conf = torch.tensor(conf)
-        self.cls = torch.tensor(cls, dtype=torch.int64)
+        self.conf = FakeTensor(conf)
+        self.cls = FakeTensor(cls)
 
     def __len__(self):
         return len(self.conf)
