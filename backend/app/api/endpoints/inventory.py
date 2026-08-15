@@ -18,6 +18,8 @@ from app.schemas.inventory import (
     InventoryItemOut,
     InventoryScanResponse,
     InventoryItemUpdate,
+    ReminderEntry,
+    RemindersResponse,
     ScanCandidate,
 )
 from app.services.classifier import (
@@ -27,6 +29,7 @@ from app.services.classifier import (
     detect_items,
 )
 from app.services.shelf_life import lookup_shelf_life_days
+from app.services.urgency import URGENCY_ORDER, classify, days_until, is_actionable
 
 router = APIRouter()
 
@@ -68,27 +71,58 @@ def list_items(db: Session = Depends(get_db)):
     return db.query(InventoryItem).all()
 
 
-@router.get("/reminders")
-def reminders(days: int = 7, db: Session = Depends(get_db)):
-    cutoff = date.today() + timedelta(days=days)
-    results = (
+@router.get("/reminders", response_model=RemindersResponse)
+def reminders(
+    days: int = 7,
+    include_expired: bool = True,
+    db: Session = Depends(get_db),
+):
+    """Items needing attention within the window.
+
+    Previously this returned everything at or before the cutoff with no lower
+    bound and no labelling, so an item that expired six months ago was presented
+    identically to one expiring tomorrow. Each entry now carries its urgency and
+    day count, and already-expired items can be excluded outright.
+    """
+    today = date.today()
+    cutoff = today + timedelta(days=days)
+
+    query = (
         db.query(InventoryItem, Expiration)
         .join(Expiration, InventoryItem.id == Expiration.item_id)
+        .filter(Expiration.expiration_date.isnot(None))
         .filter(Expiration.expiration_date <= cutoff)
-        .all()
     )
-    items = []
-    for item, exp in results:
-        items.append(
-            {
-                "id": item.id,
-                "name": item.name,
-                "quantity": item.quantity,
-                "expiration_date": exp.expiration_date,
-                "source": exp.source,
-            }
+    if not include_expired:
+        query = query.filter(Expiration.expiration_date >= today)
+
+    entries = [
+        ReminderEntry(
+            id=item.id,
+            name=item.name,
+            quantity=item.quantity,
+            unit=item.unit,
+            expiration_date=expiration.expiration_date,
+            source=expiration.source,
+            days_remaining=days_until(expiration.expiration_date, today),
+            urgency=classify(expiration.expiration_date, today),
         )
-    return {"items": items}
+        for item, expiration in query.all()
+    ]
+    # Most urgent first, so a client can render the list without re-sorting.
+    entries.sort(key=lambda entry: entry.days_remaining)
+
+    counts = {bucket.value: 0 for bucket in URGENCY_ORDER}
+    for entry in entries:
+        counts[entry.urgency.value] += 1
+
+    return RemindersResponse(
+        items=entries,
+        counts=counts,
+        action_required=sum(
+            1 for entry in entries if is_actionable(entry.urgency)
+        ),
+    )
 
 
 @router.get("/{item_id}", response_model=InventoryItemOut)

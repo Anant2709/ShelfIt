@@ -1,6 +1,8 @@
 from datetime import date, datetime
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
+
+from app.services.urgency import Urgency, classify, days_until
 
 
 class ExpirationBase(BaseModel):
@@ -46,6 +48,18 @@ class InventoryItemOut(InventoryItemBase):
     class Config:
         from_attributes = True
 
+    # Derived on the server so every client agrees, and so the rule can be
+    # tested without a browser.
+    @computed_field
+    @property
+    def days_remaining(self) -> int | None:
+        return days_until(self.expiration.expiration_date if self.expiration else None)
+
+    @computed_field
+    @property
+    def urgency(self) -> Urgency:
+        return classify(self.expiration.expiration_date if self.expiration else None)
+
 
 class ScanCandidate(BaseModel):
     """A detection the model was not confident enough to add automatically."""
@@ -75,6 +89,27 @@ class InventoryScanResponse(BaseModel):
     item: InventoryItemOut | None = None
     suggested_label: str | None = None
     confidence: float | None = None
+
+
+class ReminderEntry(BaseModel):
+    """One item needing attention, with its urgency already resolved."""
+
+    id: str
+    name: str
+    quantity: float
+    unit: str
+    expiration_date: date
+    source: str
+    days_remaining: int
+    urgency: Urgency
+
+
+class RemindersResponse(BaseModel):
+    items: list[ReminderEntry]
+    # Per-bucket totals, so a client can show badges without counting.
+    counts: dict[str, int]
+    # How many items are expired, due today, or due within three days.
+    action_required: int
 
 
 class InventoryLabelRequest(BaseModel):

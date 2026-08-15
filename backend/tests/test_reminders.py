@@ -100,23 +100,120 @@ class TestPayload:
 
 
 class TestAlreadyExpired:
-    def test_expired_items_are_currently_included(self, client, db):
-        """Documents present behaviour: the query has no lower bound."""
+    def test_expired_items_are_included_by_default(self, client, db):
+        """Something already spoiled is the most urgent thing in the fridge."""
         add_item(db, "Ancient Yogurt", -200)
         assert reminder_names(client, days=7) == ["Ancient Yogurt"]
 
-    @pytest.mark.xfail(
-        reason=(
-            "Known gap: 'Upcoming Expirations' has no lower bound, so items that "
-            "expired months ago are presented identically to items expiring "
-            "tomorrow. Urgency bucketing will separate expired from upcoming."
-        ),
-        strict=True,
-    )
-    def test_expired_items_should_be_distinguishable_from_upcoming(self, client, db):
+    def test_expired_items_are_distinguishable_from_upcoming(self, client, db):
+        """The bug this feature fixes: these used to be presented identically."""
         add_item(db, "Ancient Yogurt", -200)
         add_item(db, "Fresh Milk", 2)
         entries = client.get("/api/inventory/reminders", params={"days": 7}).json()[
             "items"
         ]
-        assert any(entry.get("status") == "expired" for entry in entries)
+        by_name = {entry["name"]: entry for entry in entries}
+        assert by_name["Ancient Yogurt"]["urgency"] == "expired"
+        assert by_name["Fresh Milk"]["urgency"] == "soon"
+
+    def test_expired_items_can_be_excluded(self, client, db):
+        add_item(db, "Ancient Yogurt", -200)
+        add_item(db, "Fresh Milk", 2)
+        names = reminder_names(client, days=7, include_expired=False)
+        assert names == ["Fresh Milk"]
+
+    def test_negative_day_counts_are_reported(self, client, db):
+        add_item(db, "Ancient Yogurt", -200)
+        entry = client.get("/api/inventory/reminders", params={"days": 7}).json()[
+            "items"
+        ][0]
+        assert entry["days_remaining"] == -200
+
+
+class TestUrgencyLabelling:
+    def test_each_bucket_is_labelled(self, client, db):
+        add_item(db, "Gone", -5)
+        add_item(db, "Today", 0)
+        add_item(db, "Soon", 2)
+        add_item(db, "This Week", 6)
+        entries = client.get("/api/inventory/reminders", params={"days": 7}).json()[
+            "items"
+        ]
+        labelled = {entry["name"]: entry["urgency"] for entry in entries}
+        assert labelled == {
+            "Gone": "expired",
+            "Today": "today",
+            "Soon": "soon",
+            "This Week": "this_week",
+        }
+
+    def test_entries_are_sorted_most_urgent_first(self, client, db):
+        add_item(db, "Later", 6)
+        add_item(db, "Gone", -5)
+        add_item(db, "Soon", 2)
+        assert reminder_names(client, days=7) == ["Gone", "Soon", "Later"]
+
+    def test_counts_summarise_each_bucket(self, client, db):
+        add_item(db, "Gone A", -5)
+        add_item(db, "Gone B", -1)
+        add_item(db, "Today", 0)
+        add_item(db, "Soon", 3)
+        body = client.get("/api/inventory/reminders", params={"days": 7}).json()
+        assert body["counts"]["expired"] == 2
+        assert body["counts"]["today"] == 1
+        assert body["counts"]["soon"] == 1
+        assert body["counts"]["this_week"] == 0
+
+    def test_counts_include_every_bucket_even_when_zero(self, client, db):
+        add_item(db, "Soon", 2)
+        counts = client.get("/api/inventory/reminders", params={"days": 7}).json()[
+            "counts"
+        ]
+        for bucket in ["expired", "today", "soon", "this_week", "later", "unknown"]:
+            assert bucket in counts
+
+    def test_action_required_counts_the_urgent_buckets(self, client, db):
+        add_item(db, "Gone", -5)
+        add_item(db, "Today", 0)
+        add_item(db, "Soon", 2)
+        add_item(db, "This Week", 6)
+        body = client.get("/api/inventory/reminders", params={"days": 7}).json()
+        assert body["action_required"] == 3, "this_week is not urgent"
+
+    def test_empty_inventory_reports_zero_action_required(self, client):
+        body = client.get("/api/inventory/reminders", params={"days": 7}).json()
+        assert body["action_required"] == 0
+        assert body["items"] == []
+
+
+class TestItemUrgency:
+    """Urgency is also exposed on inventory items themselves."""
+
+    def test_items_carry_urgency_and_day_count(self, client, db):
+        add_item(db, "Milk", 2)
+        item = client.get("/api/inventory/").json()[0]
+        assert item["urgency"] == "soon"
+        assert item["days_remaining"] == 2
+
+    def test_expired_item_is_labelled(self, client, db):
+        add_item(db, "Old Yogurt", -3)
+        item = client.get("/api/inventory/").json()[0]
+        assert item["urgency"] == "expired"
+        assert item["days_remaining"] == -3
+
+    def test_item_without_a_date_is_unknown(self, client, db):
+        add_item(db, "Salt", None)
+        item = client.get("/api/inventory/").json()[0]
+        assert item["urgency"] == "unknown"
+        assert item["days_remaining"] is None
+
+    def test_item_with_no_expiration_row_is_unknown(self, client, db):
+        add_item(db, "Salt", None, with_expiration=False)
+        item = client.get("/api/inventory/").json()[0]
+        assert item["urgency"] == "unknown"
+        assert item["days_remaining"] is None
+
+    def test_single_item_fetch_includes_urgency(self, client, db):
+        item = add_item(db, "Milk", 1)
+        body = client.get(f"/api/inventory/{item.id}").json()
+        assert body["urgency"] == "soon"

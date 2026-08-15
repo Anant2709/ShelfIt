@@ -41,18 +41,6 @@ deliberately curated exact value should still win. The inconsistency is the pric
 **Fix direction:** either expand the curated table so more names match exactly, or
 let the model see the curated value as a prior and reconcile the two.
 
-### "Upcoming Expirations" has no lower bound
-
-**Where:** `backend/app/api/endpoints/inventory.py`, `reminders()`
-**Test:** `tests/test_reminders.py::TestAlreadyExpired::test_expired_items_should_be_distinguishable_from_upcoming`
-
-The query filters `expiration_date <= cutoff` with no floor, so an item that
-expired six months ago is returned alongside one expiring tomorrow, with nothing
-in the payload to tell them apart. The UI presents both under the same heading.
-
-**Fix direction:** urgency bucketing — expired, due today, due within three days,
-due this week — surfaced as an explicit field rather than inferred client-side.
-
 ### No schema migrations
 
 **Where:** `backend/app/main.py`
@@ -81,6 +69,27 @@ baked into every query rather than a feature flag.
 nothing can be dismissed independently.
 
 ## Fixed
+
+### "Upcoming Expirations" had no lower bound
+
+**Fixed in:** the urgency commit
+**Test:** `tests/test_reminders.py::TestAlreadyExpired::test_expired_items_are_distinguishable_from_upcoming`
+
+The query filtered `expiration_date <= cutoff` with no floor and returned nothing
+to tell the results apart, so an item that expired six months ago was presented
+identically to one expiring tomorrow.
+
+Every entry now carries an `urgency` bucket (`expired`, `today`, `soon`,
+`this_week`, `later`, `unknown`) and a signed `days_remaining`, the list is sorted
+most urgent first, and the response includes per-bucket counts plus an
+`action_required` total. Expired items can also be excluded outright with
+`include_expired=false`. Items with a null expiry are now excluded from the query
+explicitly rather than relying on SQL's NULL comparison semantics.
+
+The classification is a pure function in `app/services/urgency.py`, computed on
+the server so every client agrees and the rule can be tested without a browser.
+The same fields are exposed on inventory items themselves as Pydantic computed
+fields.
 
 ### Shelf-life provenance overstated an external API
 
