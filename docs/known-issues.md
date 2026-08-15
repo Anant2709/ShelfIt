@@ -7,39 +7,21 @@ document explains the reasoning.
 
 ## Open
 
-### Shelf-life heuristic matches substrings (offline path only)
-
-**Where:** `backend/app/services/shelf_life.py`, `_heuristic_fallback()`
-**Test:** `tests/test_shelf_life.py::TestTier4Heuristic::test_substring_matching_misclassifies_shelf_stable_items`
-
-The heuristic tier tests membership with `token in name`, so any name *containing*
-a keyword inherits that keyword's shelf life. `"milk chocolate"` is assigned 5
-days because it contains `"milk"`, when it actually keeps for months. Same class
-of error for `"coconut milk"` and `"beef jerky"`.
-
-**Largely mitigated.** The model tier now answers before both the token match and
-the heuristic, so with `OPENAI_API_KEY` configured `"milk chocolate"` resolves to
-365 days. Verified on a running server. The defect only surfaces on the offline
-path, when no model is available — which is why the test remains a strict xfail
-rather than being deleted.
-
-**Fix direction:** match on word boundaries rather than substrings, and treat the
-keyword families as tokens rather than fragments.
-
-### Curated and estimated shelf lives can disagree
+### No offline shelf-life inference
 
 **Where:** `backend/app/services/shelf_life.py`
 
-Tier ordering means an exact curated entry wins, but a *token* match does not.
-So `"spinach"` resolves to 4 days from the curated table, while `"fresh spinach"`
-resolves to whatever the model says — 7 days when measured. Two spellings of the
-same item can therefore get different answers.
+With the pattern-matching tiers deleted, an item that is in neither the curated
+file nor the learned table cannot be resolved without the model. So with no
+`OPENAI_API_KEY`, or during an outage, a new item gets no date and the user is
+asked for one.
 
-This is a deliberate trade: the model is more accurate than a token match, but a
-deliberately curated exact value should still win. The inconsistency is the price.
+This is deliberate rather than a regression: the deleted tiers produced wrong
+answers confidently, and asking is better than guessing. It also self-corrects over
+time, because every resolved item is stored and promoted entries ship with the
+repo, so offline coverage grows with use.
 
-**Fix direction:** either expand the curated table so more names match exactly, or
-let the model see the curated value as a prior and reconcile the two.
+Worth knowing because it is a visible behaviour difference if the key is missing.
 
 ### No schema migrations
 
@@ -69,6 +51,41 @@ baked into every query rather than a feature flag.
 nothing can be dismissed independently.
 
 ## Fixed
+
+### Two spellings of one item could disagree
+
+**Fixed in:** the anchoring commit
+**Test:** `tests/test_shelf_life.py::TestConsistency::test_variants_of_one_item_agree`
+
+The curated file was consulted in two places at two different priorities: an exact
+match outranked the model, but a whole-word match lost to it. So the file's
+authority depended on string formatting, and `"spinach"` resolved to 4 days from
+curation while `"fresh spinach"`, `"baby spinach"`, and `"spinach leaves"` each got
+independent estimates — measured at 7, 7, and 5 days. Three different answers for
+one vegetable.
+
+The two pattern-matching tiers were deleted rather than reordered. Token similarity
+now only *retrieves* which known items to show the model, which then anchors the
+name to one of them. All four spellings resolve to 4 days on a running server.
+
+The distinction between retrieval and judgment is the point: choosing what to put
+in front of a resolver is not the same act as making the decision. A poor retrieval
+means the model reasons without a useful reference; a poor match previously became
+the answer outright.
+
+### Shelf-life heuristic matched substrings
+
+**Fixed in:** the anchoring commit
+
+`_heuristic_fallback()` tested membership with `token in name`, so any name
+containing a keyword inherited that keyword's shelf life — `"milk chocolate"` was
+assigned 5 days because it contains `"milk"`. The function was deleted along with
+the token-matching tier. `"milk chocolate"` now resolves to 365 days, and the model
+declines to anchor it to `"milk"`, which was an explicit counter-example in the
+prompt.
+
+This was the last of the two defects originally recorded as strict `xfail` tests.
+Both are now gone rather than suppressed, so the suite has no expected failures.
 
 ### "Upcoming Expirations" had no lower bound
 

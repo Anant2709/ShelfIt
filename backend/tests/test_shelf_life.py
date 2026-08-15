@@ -1,9 +1,8 @@
-"""Tests for the shelf-life inference cascade.
+"""Tests for the shelf-life cascade.
 
-The cascade is the core domain logic: given a name and no user date, decide how
-long the item keeps and record how the number was obtained. Each tier is asserted
-independently, and the ordering between them is asserted explicitly, because the
-ordering is the design decision.
+Two sources of truth and one resolver. The ordering between them is the design
+decision, so it is asserted explicitly, as is the property that motivated the
+rewrite: two spellings of the same item must not disagree.
 """
 
 import json
@@ -12,18 +11,24 @@ import pytest
 
 from app.core import config
 from app.services import shelf_life
-from app.services.cache import InMemoryCache
+from app.services.learned_store import LearnedShelfLifeStore
+from app.services.llm_estimator import Resolution
 from app.services.shelf_life import (
-    _heuristic_fallback,
+    MAX_CANDIDATES,
     _normalize_name,
+    _relevance,
+    _retrieve_candidates,
     lookup_shelf_life_days,
 )
 
 
 @pytest.fixture
-def dataset(tmp_path, monkeypatch):
-    """Point the cascade at a controlled dataset file."""
+def store(db):
+    return LearnedShelfLifeStore(session_factory=lambda: db)
 
+
+@pytest.fixture
+def dataset(tmp_path, monkeypatch):
     def _write(content: dict):
         path = tmp_path / "shelf_life.json"
         path.write_text(json.dumps(content), encoding="utf-8")
@@ -43,207 +48,256 @@ def no_dataset(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def no_llm(monkeypatch):
-    """Disable the model tier so the local tiers can be tested in isolation."""
-    monkeypatch.setattr(config.settings, "openai_api_key", None)
+def model(monkeypatch):
+    """Stub the resolver and record the candidates it was offered."""
+    calls = []
 
-
-@pytest.fixture
-def llm_says(monkeypatch):
-    """Force the model tier to return a fixed estimate."""
-
-    def _install(days):
+    def _install(resolution):
         monkeypatch.setattr(config.settings, "openai_api_key", "test-key")
-        monkeypatch.setattr(
-            shelf_life, "estimate_shelf_life_days", lambda name, **kwargs: days
-        )
+
+        def fake_resolve(name, candidates=None, client_factory=None):
+            calls.append({"name": name, "candidates": candidates or {}})
+            return resolution
+
+        monkeypatch.setattr(shelf_life, "resolve_shelf_life", fake_resolve)
+        return calls
 
     return _install
 
 
-class TestTier1ExactDataset:
-    def test_exact_key_returns_dataset_value(self, dataset, no_llm):
-        dataset({"milk": 5, "bread": 7})
-        assert lookup_shelf_life_days("milk") == (5, "dataset")
+@pytest.fixture
+def no_model(monkeypatch):
+    monkeypatch.setattr(
+        shelf_life, "resolve_shelf_life", lambda *args, **kwargs: None
+    )
 
-    def test_lookup_is_case_and_whitespace_insensitive(self, dataset, no_llm):
+
+class TestTier1Curated:
+    def test_exact_curated_match_wins(self, dataset, no_model, store):
         dataset({"milk": 5})
-        assert lookup_shelf_life_days("  MiLk  ") == (5, "dataset")
+        assert lookup_shelf_life_days("milk", store=store) == (5, "dataset")
 
-    def test_exact_match_outranks_the_model(self, dataset, llm_says):
-        """A deliberately curated value beats an estimate, and costs nothing."""
+    def test_lookup_is_case_and_whitespace_insensitive(self, dataset, no_model, store):
         dataset({"milk": 5})
-        llm_says(99)
-        assert lookup_shelf_life_days("milk") == (5, "dataset")
+        assert lookup_shelf_life_days("  MiLk  ", store=store) == (5, "dataset")
+
+    def test_curated_outranks_the_model(self, dataset, model, store):
+        """A deliberately chosen value beats an estimate, and costs nothing."""
+        dataset({"milk": 5})
+        calls = model(Resolution(days=99))
+        assert lookup_shelf_life_days("milk", store=store) == (5, "dataset")
+        assert calls == [], "the model should not have been consulted"
+
+    def test_curated_outranks_a_learned_value(self, dataset, no_model, store):
+        dataset({"milk": 5})
+        store.remember("milk", days=99)
+        assert lookup_shelf_life_days("milk", store=store) == (5, "dataset")
 
 
-class TestTier2Model:
-    def test_model_estimate_is_labelled_llm(self, no_dataset, llm_says):
-        llm_says(365)
-        assert lookup_shelf_life_days("ketchup") == (365, "llm")
+class TestTier2Learned:
+    def test_learned_value_is_reused(self, no_dataset, model, store):
+        store.remember("paneer", days=12)
+        calls = model(Resolution(days=99))
+        assert lookup_shelf_life_days("paneer", store=store) == (12, "learned")
+        assert calls == [], "a learned value must not trigger another call"
 
-    def test_model_outranks_the_token_match(self, dataset, llm_says):
-        """The case the old cascade got wrong.
+    def test_learned_provenance_is_distinct_from_curated(
+        self, no_dataset, no_model, store
+    ):
+        """A machine-derived value must never claim to be human-curated."""
+        store.remember("paneer", days=12)
+        _, source = lookup_shelf_life_days("paneer", store=store)
+        assert source == "learned"
 
-        "milk chocolate" contains the token "milk", so a token match assigns it a
-        5-day dairy shelf life. A model that understands the item does not.
+
+class TestTier3Model:
+    def test_resolution_is_returned_and_persisted(self, no_dataset, model, store):
+        model(Resolution(days=21))
+        assert lookup_shelf_life_days("paneer", store=store) == (21, "llm")
+        assert store.get("paneer").days == 21
+
+    def test_anchor_is_persisted(self, dataset, model, store):
+        dataset({"spinach": 4})
+        model(Resolution(days=4, anchor="spinach", anchor_days=4))
+        lookup_shelf_life_days("baby spinach", store=store)
+        entry = store.get("baby spinach")
+        assert entry.anchor == "spinach"
+        assert entry.anchor_days == 4
+
+    def test_model_used_is_recorded(self, no_dataset, model, store, monkeypatch):
+        monkeypatch.setattr(config.settings, "openai_model", "gpt-4o")
+        model(Resolution(days=21))
+        lookup_shelf_life_days("paneer", store=store)
+        assert store.get("paneer").model == "gpt-4o"
+
+    def test_second_lookup_is_served_from_the_store(self, no_dataset, model, store):
+        """Persisting the answer is what caps cost at one call per name."""
+        calls = model(Resolution(days=21))
+        lookup_shelf_life_days("paneer", store=store)
+        lookup_shelf_life_days("paneer", store=store)
+        assert len(calls) == 1
+
+    def test_answers_are_stable_across_lookups(self, no_dataset, model, store):
+        model(Resolution(days=21))
+        results = {lookup_shelf_life_days("paneer", store=store) for _ in range(5)}
+        assert results == {(21, "llm"), (21, "learned")}
+
+
+class TestUnresolved:
+    def test_nothing_is_invented(self, no_dataset, no_model, store):
+        """No date beats a fabricated date; the user is asked instead."""
+        assert lookup_shelf_life_days("saffron", store=store) == (None, "unknown")
+
+    def test_failure_is_not_persisted(self, no_dataset, no_model, store):
+        lookup_shelf_life_days("saffron", store=store)
+        assert store.get("saffron") is None
+
+    def test_a_later_attempt_can_still_resolve(self, no_dataset, model, store):
+        """Because nothing was stored, recovery is immediate."""
+        model(Resolution(days=30))
+        assert lookup_shelf_life_days("saffron", store=store) == (30, "llm")
+
+
+class TestConsistency:
+    def test_variants_of_one_item_agree(self, dataset, monkeypatch, store):
+        """The defect this rewrite exists to fix.
+
+        Previously "spinach" resolved to 4 from the curated table while "fresh
+        spinach" bypassed it and got an independent estimate. Anchoring makes the
+        variant inherit the curated number.
         """
-        dataset({"milk": 5})
-        llm_says(240)
-        assert lookup_shelf_life_days("milk chocolate") == (240, "llm")
+        dataset({"spinach": 4})
+        monkeypatch.setattr(config.settings, "openai_api_key", "test-key")
 
-    def test_model_outranks_the_heuristic(self, no_dataset, llm_says):
-        llm_says(120)
-        assert lookup_shelf_life_days("coconut milk") == (120, "llm")
+        def anchored(name, candidates=None, client_factory=None):
+            if "spinach" in (candidates or {}):
+                return Resolution(
+                    days=candidates["spinach"], anchor="spinach", anchor_days=4
+                )
+            return None
 
-    def test_absent_model_falls_through(self, dataset, no_llm):
-        dataset({"bread": 7})
-        assert lookup_shelf_life_days("whole wheat bread") == (7, "dataset")
+        monkeypatch.setattr(shelf_life, "resolve_shelf_life", anchored)
 
+        base, _ = lookup_shelf_life_days("spinach", store=store)
+        variant, _ = lookup_shelf_life_days("fresh spinach", store=store)
+        assert base == variant == 4
 
-class TestTier3TokenDataset:
-    def test_multiword_name_matches_on_token(self, dataset, no_llm):
-        """"Whole wheat bread" is not a key, but "bread" is."""
-        dataset({"bread": 7})
-        assert lookup_shelf_life_days("Whole wheat bread") == (7, "dataset")
+    def test_removed_tiers_no_longer_guess(self, dataset, no_model, store):
+        """Token matching and the keyword heuristic were deleted.
 
-    def test_longest_matching_key_wins(self, dataset, no_llm):
-        """A specific multi-word key beats a shorter generic token.
-
-        The looked-up name is deliberately not itself a key, otherwise tier 1
-        would answer and this branch would never run.
+        "whole wheat bread" no longer silently inherits "bread", and with no model
+        available it resolves to nothing rather than to a pattern guess.
         """
-        dataset({"bread": 7, "wheat bread": 3})
-        assert lookup_shelf_life_days("whole wheat bread") == (3, "dataset")
-
-    def test_multiword_key_must_appear_contiguously(self, dataset, no_llm):
-        dataset({"wheat bread": 3})
-        assert lookup_shelf_life_days("wheat flour and white bread") == (
+        dataset({"bread": 7})
+        assert lookup_shelf_life_days("whole wheat bread", store=store) == (
             None,
             "unknown",
         )
 
-    def test_partial_token_does_not_match_the_dataset(self, dataset, no_llm):
-        """"milkshake" is one token, so it must not match the "milk" key.
-
-        It still resolves, but via the heuristic tier -- the source is what proves
-        the token tier declined.
-        """
+    def test_compound_names_are_not_misclassified_offline(
+        self, dataset, no_model, store
+    ):
+        """The old heuristic gave "milk chocolate" a five-day dairy shelf life."""
         dataset({"milk": 5})
-        _, source = lookup_shelf_life_days("milkshake")
-        assert source == "heuristic"
-
-    def test_model_style_sku_label_resolves_via_token(self, dataset, no_llm):
-        """Classifier labels like "100_milk" tokenise to {"100", "milk"}."""
-        dataset({"milk": 5})
-        assert lookup_shelf_life_days("100_milk") == (5, "dataset")
-
-
-class TestTier4Heuristic:
-    @pytest.mark.parametrize(
-        "name,expected_days",
-        [
-            ("whole milk", 5),
-            ("cheddar cheese", 5),
-            ("greek yogurt", 5),
-            ("chicken breast", 3),
-            ("ground beef", 3),
-            ("pork chops", 3),
-            ("baby spinach", 4),
-            ("romaine lettuce", 4),
-            ("mixed greens", 4),
-        ],
-    )
-    def test_keyword_families(self, no_dataset, no_llm, name, expected_days):
-        assert lookup_shelf_life_days(name) == (expected_days, "heuristic")
-
-    def test_unrecognised_name_returns_unknown(self, no_dataset, no_llm):
-        """Failing open is deliberate: no date beats a fabricated date."""
-        assert lookup_shelf_life_days("saffron") == (None, "unknown")
-
-    def test_heuristic_is_a_pure_function(self):
-        assert _heuristic_fallback("MILK") == 5
-        assert _heuristic_fallback("saffron") is None
-
-    @pytest.mark.xfail(
-        reason=(
-            "Known defect in the offline fallback: the heuristic matches "
-            "substrings, so any name containing a keyword inherits that "
-            "keyword's shelf life. With a model configured this no longer "
-            "surfaces, because the model tier answers first -- but with no "
-            "model available, 'milk chocolate' is still assigned 5 days."
-        ),
-        strict=True,
-    )
-    def test_substring_matching_misclassifies_shelf_stable_items(
-        self, no_dataset, no_llm
-    ):
-        days, _ = lookup_shelf_life_days("milk chocolate")
-        assert days is None or days > 30
-
-
-class TestProvenance:
-    """Every answer must say where it came from, and never overstate it."""
-
-    @pytest.mark.parametrize(
-        "source", ["dataset", "llm", "heuristic", "unknown"]
-    )
-    def test_sources_are_from_the_known_set(self, source):
-        assert source in {"user", "dataset", "llm", "heuristic", "unknown"}
-
-    def test_no_answer_claims_an_external_data_provider(
-        self, no_dataset, llm_says
-    ):
-        """Regression guard.
-
-        The removed Spoonacular tier reported source="api" for a number it had
-        invented, because Spoonacular does not publish shelf-life data. No tier
-        may claim that provenance again.
-        """
-        llm_says(30)
-        _, source = lookup_shelf_life_days("ketchup")
-        assert source != "api"
-
-    def test_unresolved_items_are_marked_unknown_not_guessed(
-        self, no_dataset, no_llm
-    ):
-        days, source = lookup_shelf_life_days("saffron")
+        days, source = lookup_shelf_life_days("milk chocolate", store=store)
         assert days is None
         assert source == "unknown"
 
 
-class TestCascadeIntegration:
-    def test_model_tier_is_cached_across_lookups(self, no_dataset, monkeypatch):
-        """The expensive tier caches itself, so repeats are free."""
-        monkeypatch.setattr(config.settings, "openai_api_key", "test-key")
-        calls = []
+class TestProvenance:
+    @pytest.mark.parametrize(
+        "name,expected",
+        [("dataset", "dataset"), ("learned", "learned"), ("llm", "llm")],
+    )
+    def test_sources_are_from_the_known_set(self, name, expected):
+        assert name in {"user", "dataset", "learned", "llm", "unknown"}
 
-        def fake_estimate(name, **kwargs):
-            calls.append(name)
-            return 12
+    def test_no_tier_claims_an_external_data_provider(
+        self, no_dataset, model, store
+    ):
+        """Regression guard.
 
-        monkeypatch.setattr(shelf_life, "estimate_shelf_life_days", fake_estimate)
-        cache = InMemoryCache()
-        assert lookup_shelf_life_days("paneer", cache=cache) == (12, "llm")
-        assert calls == ["paneer"]
+        The removed Spoonacular tier reported source="api" for a number it had
+        invented. No tier may claim that provenance again.
+        """
+        model(Resolution(days=30))
+        _, source = lookup_shelf_life_days("ketchup", store=store)
+        assert source != "api"
 
-    def test_estimator_kwargs_are_forwarded(self, no_dataset, monkeypatch):
-        received = {}
+    def test_heuristic_provenance_is_gone(self, no_dataset, no_model, store):
+        _, source = lookup_shelf_life_days("chicken breast", store=store)
+        assert source != "heuristic"
 
-        def fake_estimate(name, **kwargs):
-            received.update(kwargs)
-            return 5
 
-        monkeypatch.setattr(config.settings, "openai_api_key", "test-key")
-        monkeypatch.setattr(shelf_life, "estimate_shelf_life_days", fake_estimate)
-        sentinel = InMemoryCache()
-        lookup_shelf_life_days("paneer", cache=sentinel)
-        assert received["cache"] is sentinel
+class TestCandidateRetrieval:
+    def test_curated_and_learned_items_are_both_offered(
+        self, dataset, model, store
+    ):
+        dataset({"spinach": 4})
+        store.remember("tofu", days=9)
+        calls = model(Resolution(days=5))
+        lookup_shelf_life_days("spinach tofu salad", store=store)
+        assert calls[0]["candidates"] == {"spinach": 4, "tofu": 9}
+
+    def test_curated_values_win_over_learned_for_the_same_name(
+        self, dataset, model, store
+    ):
+        """Where both know an item, the human-authored number is shown."""
+        dataset({"spinach": 4})
+        store.remember("spinach", days=99)
+        calls = model(Resolution(days=5))
+        lookup_shelf_life_days("fresh spinach leaves", store=store)
+        assert calls[0]["candidates"]["spinach"] == 4
+
+    def test_irrelevant_items_are_not_offered(self, dataset, model, store):
+        dataset({"spinach": 4, "ketchup": 365})
+        calls = model(Resolution(days=5))
+        lookup_shelf_life_days("baby spinach", store=store)
+        assert "ketchup" not in calls[0]["candidates"]
+
+    def test_candidate_count_is_capped(self, dataset, model, store):
+        dataset({f"spinach{i}": i + 1 for i in range(30)} | {"spinach": 4})
+        calls = model(Resolution(days=5))
+        lookup_shelf_life_days("spinach", store=store)
+        # "spinach" is an exact curated match, so use a name that is not.
+        lookup_shelf_life_days("some spinach thing", store=store)
+        assert len(calls[-1]["candidates"]) <= MAX_CANDIDATES
+
+    def test_no_known_items_yields_no_candidates(self, no_dataset, model, store):
+        calls = model(Resolution(days=5))
+        lookup_shelf_life_days("dragonfruit", store=store)
+        assert calls[0]["candidates"] == {}
+
+
+class TestRelevance:
+    def test_contained_phrase_outranks_a_shared_token(self):
+        tokens = {"whole", "wheat", "bread"}
+        assert _relevance("wheat bread", "whole wheat bread", tokens) > _relevance(
+            "bread", "whole wheat bread", tokens
+        )
+
+    def test_longer_contained_phrase_outranks_a_shorter_one(self):
+        tokens = {"whole", "wheat", "bread"}
+        assert _relevance("wheat bread", "whole wheat bread", tokens) > _relevance(
+            "wheat", "whole wheat bread", tokens
+        )
+
+    def test_unrelated_key_scores_zero(self):
+        assert _relevance("ketchup", "baby spinach", {"baby", "spinach"}) == 0
+
+    def test_shared_token_scores_above_zero(self):
+        assert _relevance("spinach", "baby spinach", {"baby", "spinach"}) > 0
+
+    def test_retrieval_orders_most_relevant_first(self, dataset, store):
+        dataset({"bread": 7, "wheat bread": 3, "milk": 5})
+        candidates = _retrieve_candidates("whole wheat bread", store)
+        assert list(candidates)[0] == "wheat bread"
+        assert "milk" not in candidates
 
 
 class TestDatasetFileMemoisation:
     def test_file_is_parsed_once_for_repeated_lookups(
-        self, dataset, no_llm, monkeypatch
+        self, dataset, no_model, store, monkeypatch
     ):
         dataset({"milk": 5})
         loads = []
@@ -255,13 +309,15 @@ class TestDatasetFileMemoisation:
 
         monkeypatch.setattr(shelf_life.json, "load", counting_load)
         for _ in range(5):
-            lookup_shelf_life_days("milk")
-        assert len(loads) == 1, "dataset should be read from disk once"
+            lookup_shelf_life_days("milk", store=store)
+        assert len(loads) == 1
 
-    def test_editing_the_file_invalidates_the_memoised_copy(self, dataset, no_llm):
+    def test_editing_the_file_invalidates_the_memoised_copy(
+        self, dataset, no_model, store
+    ):
         """Keyed on mtime so development edits take effect without a restart."""
         path = dataset({"milk": 5})
-        assert lookup_shelf_life_days("milk") == (5, "dataset")
+        assert lookup_shelf_life_days("milk", store=store) == (5, "dataset")
 
         import os
         import time
@@ -270,7 +326,7 @@ class TestDatasetFileMemoisation:
         future = time.time() + 10
         os.utime(path, (future, future))
 
-        assert lookup_shelf_life_days("milk") == (9, "dataset")
+        assert lookup_shelf_life_days("milk", store=store) == (9, "dataset")
 
     def test_missing_file_yields_an_empty_dataset(self, no_dataset):
         assert shelf_life._load_dataset() == {}

@@ -102,18 +102,44 @@ Set in `backend/.env` or the environment.
 
 ### How an expiry date is chosen
 
-With no user-supplied date, the shelf life is resolved by a cascade that records
-which tier answered, so a guess is never mistaken for a fact:
+With no user-supplied date, the shelf life is resolved from two sources of truth
+and one resolver. Every answer records where it came from, so a guess is never
+mistaken for a fact:
 
-| Order | Tier | `source` | Cost |
+| Order | Source | `source` | Cost |
 |---|---|---|---|
-| 1 | Exact match in `data/shelf_life.json` | `dataset` | free |
-| 2 | Language-model estimate | `llm` | one cached call per item name |
-| 3 | Whole-word match in `data/shelf_life.json` | `dataset` | free |
-| 4 | Keyword family (dairy / meat / greens) | `heuristic` | free |
-| — | Nothing matched; no date is invented | `unknown` | free |
+| 1 | Exact match in `data/shelf_life.json` — human-authored, read-only at runtime | `dataset` | free |
+| 2 | Exact match in the learned table — previously resolved | `learned` | free |
+| 3 | The model, shown the closest known items, anchoring where it can | `llm` | one call per new name |
+| — | Nothing resolved; no date is invented and the user is asked | `unknown` | free |
 
 A date the user typed is always recorded as `user` and never overwritten.
+
+**Anchoring.** When the model resolves a name, it reports which known item it
+reasoned from. `baby spinach` anchors to the curated `spinach` and inherits its 4
+days, so variants of one item cannot disagree. The anchor is stored, which turns a
+bare number into a checkable claim — `coconut milk: 5, derived from milk` is
+visibly wrong on inspection, whereas `coconut milk: 5` is not. The anchor's value
+at derivation time is stored too, so editing a curated value flags every entry
+derived from it as stale instead of letting them drift silently.
+
+**The app never writes to `data/shelf_life.json`.** That file is human-authored and
+version-controlled; mixing machine output into it would make learned values
+indistinguishable from curated ones and grant them authority they have not earned.
+Learned values live in the database and are promoted only by a person:
+
+```bash
+cd backend
+python -m scripts.review_shelf_life                     # what has been learned, and from what
+python -m scripts.review_shelf_life --approve-anchored  # bulk-approve entries with a known basis
+python -m scripts.review_shelf_life --correct "coconut milk" 730
+python -m scripts.review_shelf_life --stale             # anchors whose curated value changed
+```
+
+Promoting an entry writes it into the curated file, so it resolves for free
+thereafter and ships with the repo — a fresh install inherits prior curation. This
+is the same human-in-the-loop pattern as image labelling: the system does the work,
+flags what it is unsure of, and a person's decision becomes ground truth.
 
 ## API
 

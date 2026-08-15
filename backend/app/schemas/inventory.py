@@ -60,6 +60,17 @@ class InventoryItemOut(InventoryItemBase):
     def urgency(self) -> Urgency:
         return classify(self.expiration.expiration_date if self.expiration else None)
 
+    @computed_field
+    @property
+    def needs_expiry_date(self) -> bool:
+        """True when no tier could establish a date, so the user must supply one.
+
+        Surfaced explicitly rather than left implicit: an item with no date drops
+        out of reminders entirely, so without this the user would silently get no
+        value from it and never learn why.
+        """
+        return self.expiration is None or self.expiration.expiration_date is None
+
 
 class ScanCandidate(BaseModel):
     """A detection the model was not confident enough to add automatically."""
@@ -110,6 +121,9 @@ class RemindersResponse(BaseModel):
     counts: dict[str, int]
     # How many items are expired, due today, or due within three days.
     action_required: int
+    # Items with no resolvable date. They cannot be ranked by urgency, so they are
+    # reported as a count for the client to prompt about separately.
+    needs_expiry_date: int
 
 
 class InventoryLabelRequest(BaseModel):

@@ -1,22 +1,27 @@
 """Shelf-life inference.
 
 Given an item name and no user-supplied date, decide how many days it keeps and
-record how the number was obtained. The tier that answered is returned alongside
-the value, so provenance is never lost and a guess is never mistaken for a fact.
+record where the number came from. Two sources of truth, one resolver:
 
-    1. dataset    exact match in the curated table -- reliable and free
-    2. llm        a model that can actually answer -- accurate, cached, costs money
-    3. dataset    whole-word match in the curated table -- free, but crude
-    4. heuristic  keyword family (dairy / meat / greens) -- free, cruder still
-       unknown    nothing matched; no date is fabricated
+    1. dataset  exact match in the curated file -- human-authored, read-only
+    2. learned  exact match in the learned table -- previously resolved
+    3. llm      the model, shown the closest known items, anchoring where it can;
+                the answer is written to the learned table
+       unknown  nothing resolved, and no date is invented -- the user is asked
 
-The ordering is by expected accuracy, not by cost, with one exception: an exact
-curated entry outranks the model because it was chosen deliberately. Tiers 3 and 4
-sit below the model because they are pattern guesses; they remain as the offline
-path when no model is configured.
+Two earlier tiers were deleted rather than reordered. A whole-word match against
+the curated file and a keyword heuristic were both pattern guesses: they found
+*some* word from the item's name in a table and assumed the whole item behaved
+like that word, which is how "milk chocolate" acquired a five-day dairy shelf
+life. They also created an inconsistency, because the curated file outranked the
+model on an exact match but lost to it on a partial one -- so "spinach" and
+"fresh spinach" could disagree.
 
-Caching lives in the estimator rather than here, so the local tiers stay free to
-re-evaluate and edits to the curated file take effect immediately.
+Token similarity is still used, but only to *retrieve* which known items to show
+the model. Choosing what to put in front of a resolver is a different act from
+making the decision, and the failure modes differ: a poor retrieval means the
+model reasons without a useful reference, while a poor match previously became
+the answer outright.
 """
 
 from __future__ import annotations
@@ -27,7 +32,11 @@ from pathlib import Path
 from typing import Tuple
 
 from app.core.config import settings
-from app.services.llm_estimator import estimate_shelf_life_days
+from app.services.learned_store import LearnedShelfLifeStore, get_learned_store
+from app.services.llm_estimator import resolve_shelf_life
+
+# How many known items to offer the model as reference material.
+MAX_CANDIDATES = 8
 
 # (path, mtime, parsed) -- keyed on mtime so editing the file during development
 # takes effect without a restart.
@@ -65,63 +74,78 @@ def _normalize_name(name: str) -> str:
     return name.strip().lower()
 
 
-def _lookup_exact(normalized: str) -> int | None:
-    return _load_dataset().get(normalized)
+def _tokens(value: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", value))
 
 
-def _lookup_by_token(normalized: str) -> int | None:
-    """Whole-word match, so "Whole wheat bread" can find the "bread" entry.
+def _relevance(key: str, name: str, name_tokens: set[str]) -> int:
+    """How likely a known item is to be a useful reference for `name`.
 
-    Also bridges classifier labels like "100_milk", which tokenise to
-    {"100", "milk"} and would otherwise match nothing.
+    Only used for retrieval, so being approximate is acceptable.
     """
-    dataset = _load_dataset()
-    if not dataset:
-        return None
-
-    tokens = set(re.findall(r"[a-z0-9]+", normalized))
-    candidates = []
-    for key, days in dataset.items():
-        if " " in key and key in normalized:
-            candidates.append((len(key), days))
-        elif key in tokens:
-            candidates.append((len(key), days))
-    if not candidates:
-        return None
-    # Longest matching key wins, so a specific entry beats a generic one.
-    candidates.sort(reverse=True)
-    return candidates[0][1]
+    if key in name:
+        # A contained phrase is the strongest signal, weighted by its length so a
+        # specific match outranks a generic one.
+        return 100 + len(key)
+    shared = len(_tokens(key) & name_tokens)
+    return shared * 10 if shared else 0
 
 
-def _heuristic_fallback(name: str) -> int | None:
-    name = _normalize_name(name)
-    if any(token in name for token in ["milk", "cheese", "yogurt"]):
-        return 5
-    if any(token in name for token in ["chicken", "beef", "pork"]):
-        return 3
-    if any(token in name for token in ["lettuce", "spinach", "greens"]):
-        return 4
-    return None
+def _retrieve_candidates(
+    normalized: str, store: LearnedShelfLifeStore
+) -> dict[str, int]:
+    """The known items most worth showing the model, curated first."""
+    known: dict[str, int] = {}
+    # Learned values are added first so curated ones overwrite them on conflict:
+    # where both know an item, the human-authored number is the one to show.
+    for entry in store.all():
+        known[entry.name] = entry.days
+    known.update(_load_dataset())
+
+    name_tokens = _tokens(normalized)
+    scored = [
+        (_relevance(key, normalized, name_tokens), key, days)
+        for key, days in known.items()
+    ]
+    relevant = sorted(
+        (item for item in scored if item[0] > 0), key=lambda item: -item[0]
+    )
+    return {key: days for _, key, days in relevant[:MAX_CANDIDATES]}
 
 
-def lookup_shelf_life_days(name: str, **estimator_kwargs) -> Tuple[int | None, str]:
-    """Days the item keeps, paired with the tier that produced the number."""
+def lookup_shelf_life_days(
+    name: str,
+    store: LearnedShelfLifeStore | None = None,
+    client_factory=None,
+) -> Tuple[int | None, str]:
+    """Days the item keeps, paired with where the number came from."""
     normalized = _normalize_name(name)
 
-    exact = _lookup_exact(normalized)
-    if exact is not None:
-        return exact, "dataset"
+    curated = _load_dataset().get(normalized)
+    if curated is not None:
+        return curated, "dataset"
 
-    estimated = estimate_shelf_life_days(normalized, **estimator_kwargs)
-    if estimated is not None:
-        return estimated, "llm"
+    active_store = store if store is not None else get_learned_store()
 
-    by_token = _lookup_by_token(normalized)
-    if by_token is not None:
-        return by_token, "dataset"
+    learned = active_store.get(normalized)
+    if learned is not None:
+        return learned.days, "learned"
 
-    heuristic = _heuristic_fallback(normalized)
-    if heuristic is not None:
-        return heuristic, "heuristic"
+    resolution = resolve_shelf_life(
+        normalized,
+        candidates=_retrieve_candidates(normalized, active_store),
+        client_factory=client_factory,
+    )
+    if resolution is None:
+        # Nothing could be established, so nothing is invented. The item is
+        # flagged as needing a date and the user is asked.
+        return None, "unknown"
 
-    return None, "unknown"
+    active_store.remember(
+        normalized,
+        days=resolution.days,
+        anchor=resolution.anchor,
+        anchor_days=resolution.anchor_days,
+        model=settings.openai_model,
+    )
+    return resolution.days, "llm"

@@ -74,14 +74,17 @@ def isolated_cache(monkeypatch):
     exercise caching opt in by constructing a real backend and passing it in.
     """
     from app.services import cache as cache_module
+    from app.services import learned_store as learned_store_module
     from app.services import shelf_life as shelf_life_module
 
     cache_module.reset_cache()
     shelf_life_module.reset_dataset_cache()
+    learned_store_module.reset_learned_store()
     monkeypatch.setattr(cache_module.settings, "cache_backend", "none")
     yield
     cache_module.reset_cache()
     shelf_life_module.reset_dataset_cache()
+    learned_store_module.reset_learned_store()
 
 
 @pytest.fixture(autouse=True)

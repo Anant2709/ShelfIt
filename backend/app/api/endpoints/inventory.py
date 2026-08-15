@@ -116,12 +116,23 @@ def reminders(
     for entry in entries:
         counts[entry.urgency.value] += 1
 
+    # Counted separately because these items have no date to rank or filter on.
+    undated = (
+        db.query(InventoryItem)
+        .outerjoin(Expiration, InventoryItem.id == Expiration.item_id)
+        .filter(
+            (Expiration.item_id.is_(None)) | (Expiration.expiration_date.is_(None))
+        )
+        .count()
+    )
+
     return RemindersResponse(
         items=entries,
         counts=counts,
         action_required=sum(
             1 for entry in entries if is_actionable(entry.urgency)
         ),
+        needs_expiry_date=undated,
     )
 
 

@@ -8,5 +8,12 @@ nothing else imports would silently never get a table.
 from app.models.base import Base
 from app.models.cache import CacheEntry
 from app.models.inventory import Expiration, InventoryItem
+from app.models.shelf_life import LearnedShelfLife
 
-__all__ = ["Base", "CacheEntry", "Expiration", "InventoryItem"]
+__all__ = [
+    "Base",
+    "CacheEntry",
+    "Expiration",
+    "InventoryItem",
+    "LearnedShelfLife",
+]
