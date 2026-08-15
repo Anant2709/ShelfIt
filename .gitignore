@@ -42,3 +42,8 @@ vite.config.js.timestamp-*
 
 # Database backups
 *.db.backup-*
+
+# Coverage artifacts
+.coverage
+coverage.xml
+htmlcov/
