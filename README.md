@@ -88,13 +88,32 @@ Set in `backend/.env` or the environment.
 | Variable | Default | Purpose |
 |---|---|---|
 | `DATABASE_URL` | `sqlite:///<repo>/data/shelfit.db` | Storage |
-| `OPENAI_API_KEY` | — | Enables the assistant |
-| `OPENAI_MODEL` | `gpt-4o-mini` | Assistant model |
-| `SHELF_LIFE_API_KEY` | — | Enables the Spoonacular tier |
-| `MODEL_PATH` | `<repo>/data/model.pt` | Local YOLO weights |
+| `OPENAI_API_KEY` | — | Enables the assistant, image recognition, and shelf-life estimation |
+| `OPENAI_MODEL` | `gpt-4o-mini` | Assistant and shelf-life estimation model |
+| `CLASSIFIER_BACKEND` | `vision_llm` | `vision_llm`, `yolo`, or `null` |
+| `VISION_MODEL` | `gpt-4o-mini` | Model used for image recognition |
+| `MAX_DETECTIONS_PER_IMAGE` | `10` | Cap on items recognised in one photo |
 | `MODEL_CONFIDENCE_THRESHOLD` | `0.7` | Below this, a scan asks the user to label |
+| `CACHE_BACKEND` | `sql` | `sql`, `memory`, or `none` |
+| `CACHE_TTL_DAYS` | `30` | Lifetime of cached lookups |
+| `MODEL_PATH` | `<repo>/data/model.pt` | Local YOLO weights, for the `yolo` backend |
 | `UPLOAD_DIR` | `<repo>/data/uploads` | Scanned images |
 | `ROBOFLOW_API_KEY` / `ROBOFLOW_WORKSPACE` / `ROBOFLOW_PROJECT` / `ROBOFLOW_VERSION` | — | Training data source |
+
+### How an expiry date is chosen
+
+With no user-supplied date, the shelf life is resolved by a cascade that records
+which tier answered, so a guess is never mistaken for a fact:
+
+| Order | Tier | `source` | Cost |
+|---|---|---|---|
+| 1 | Exact match in `data/shelf_life.json` | `dataset` | free |
+| 2 | Language-model estimate | `llm` | one cached call per item name |
+| 3 | Whole-word match in `data/shelf_life.json` | `dataset` | free |
+| 4 | Keyword family (dairy / meat / greens) | `heuristic` | free |
+| — | Nothing matched; no date is invented | `unknown` | free |
+
+A date the user typed is always recorded as `user` and never overwritten.
 
 ## API
 

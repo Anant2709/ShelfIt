@@ -18,9 +18,7 @@ _TMP_ROOT = Path(tempfile.mkdtemp(prefix="shelfit-tests-"))
 os.environ["DATABASE_URL"] = f"sqlite:///{_TMP_ROOT / 'import-time.db'}"
 os.environ["UPLOAD_DIR"] = str(_TMP_ROOT / "uploads")
 os.environ["MODEL_PATH"] = str(_TMP_ROOT / "model-that-does-not-exist.pt")
-# Unset by default so the shelf-life cascade cannot reach Spoonacular and the
-# chatbot cannot reach OpenAI unless a test opts in explicitly.
-os.environ["SHELF_LIFE_API_KEY"] = ""
+# Unset by default so no code path can reach OpenAI unless a test opts in.
 os.environ["OPENAI_API_KEY"] = ""
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -90,8 +88,9 @@ def isolated_cache(monkeypatch):
 def block_outbound_http(monkeypatch):
     """Fail loudly if a test makes a real outbound HTTP call via requests.
 
-    Tests that need to exercise an outbound-call path monkeypatch the specific
-    function they care about instead.
+    No application code uses `requests` any more, so this is a guard against a
+    future change reintroducing an unmocked network call. Tests that exercise an
+    outbound path monkeypatch the specific client they care about instead.
     """
     import requests
 

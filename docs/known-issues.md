@@ -7,7 +7,7 @@ document explains the reasoning.
 
 ## Open
 
-### Shelf-life heuristic matches substrings
+### Shelf-life heuristic matches substrings (offline path only)
 
 **Where:** `backend/app/services/shelf_life.py`, `_heuristic_fallback()`
 **Test:** `tests/test_shelf_life.py::TestTier4Heuristic::test_substring_matching_misclassifies_shelf_stable_items`
@@ -17,12 +17,29 @@ a keyword inherits that keyword's shelf life. `"milk chocolate"` is assigned 5
 days because it contains `"milk"`, when it actually keeps for months. Same class
 of error for `"coconut milk"` and `"beef jerky"`.
 
-Note that tier 2 (the curated dataset) does *not* have this problem — it
-tokenizes and matches whole words, which is why `"milkshake"` correctly fails to
-match the `"milk"` key there. Only the heuristic is affected.
+**Largely mitigated.** The model tier now answers before both the token match and
+the heuristic, so with `OPENAI_API_KEY` configured `"milk chocolate"` resolves to
+365 days. Verified on a running server. The defect only surfaces on the offline
+path, when no model is available — which is why the test remains a strict xfail
+rather than being deleted.
 
 **Fix direction:** match on word boundaries rather than substrings, and treat the
 keyword families as tokens rather than fragments.
+
+### Curated and estimated shelf lives can disagree
+
+**Where:** `backend/app/services/shelf_life.py`
+
+Tier ordering means an exact curated entry wins, but a *token* match does not.
+So `"spinach"` resolves to 4 days from the curated table, while `"fresh spinach"`
+resolves to whatever the model says — 7 days when measured. Two spellings of the
+same item can therefore get different answers.
+
+This is a deliberate trade: the model is more accurate than a token match, but a
+deliberately curated exact value should still win. The inconsistency is the price.
+
+**Fix direction:** either expand the curated table so more names match exactly, or
+let the model see the curated value as a prior and reconcile the two.
 
 ### "Upcoming Expirations" has no lower bound
 
@@ -35,26 +52,6 @@ in the payload to tell them apart. The UI presents both under the same heading.
 
 **Fix direction:** urgency bucketing — expired, due today, due within three days,
 due this week — surfaced as an explicit field rather than inferred client-side.
-
-### Shelf-life provenance overstates the external API
-
-**Where:** `backend/app/services/shelf_life.py`, `_fetch_from_web()`
-
-Spoonacular does not return shelf-life data. The call only confirms that a string
-is a recognisable food, after which the code returns a hardcoded 5 days but labels
-the result `source="api"`. That reads as "a data provider told us five days" when
-it means "something we asked confirmed this is food, so we guessed." It is why
-sugar and cooking oil are both assigned five days.
-
-Now that external resolutions are cached, this misleading label is also
-*persisted* for 30 days, which raises the stakes slightly: a wrong value used to
-be recomputed, and now it sticks. The cache namespace is versioned
-(`shelf_life_external_v1`) precisely so fixing the logic can invalidate every
-previously stored answer.
-
-**Fix direction:** either drop the tier, or relabel it honestly and let the
-assistant estimate a shelf life for unresolved items with its own provenance
-value.
 
 ### No schema migrations
 
@@ -84,6 +81,25 @@ baked into every query rather than a feature flag.
 nothing can be dismissed independently.
 
 ## Fixed
+
+### Shelf-life provenance overstated an external API
+
+**Fixed in:** the provenance commit
+**Test:** `tests/test_shelf_life.py::TestProvenance::test_no_answer_claims_an_external_data_provider`
+
+Spoonacular does not publish shelf-life data. The call only confirmed that a
+string was a recognisable food, after which the code returned a hardcoded 5 days
+and labelled the result `source="api"` — which reads as "a data provider told us
+five days" but meant "something confirmed this is food, so we guessed." It is why
+sugar and cooking oil were both assigned five days.
+
+The tier was removed rather than relabelled, and replaced with a model that can
+actually answer the question, reported as `source="llm"`. Measured against a
+running server: ketchup went from 5 days to 365, olive oil from 5 to 365, saffron
+from no answer to 365, and sugar now correctly returns no date at all rather than
+a fabricated five days.
+
+A regression test asserts that no tier may report `source="api"` again.
 
 ### Uploaded filenames were not sanitised
 

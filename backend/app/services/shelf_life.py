@@ -1,37 +1,33 @@
 """Shelf-life inference.
 
 Given an item name and no user-supplied date, decide how many days it keeps and
-record how much to trust that number. Tiers are ordered most-trustworthy first,
-and the tier that answered is returned alongside the value so provenance is never
-lost:
+record how the number was obtained. The tier that answered is returned alongside
+the value, so provenance is never lost and a guess is never mistaken for a fact.
 
-    1. dataset   exact match against the curated table
-    2. dataset   whole-word match against the same table
-    3. api       external food service
-    4. heuristic keyword family (dairy / meat / greens)
-       unknown   nothing matched; no date is fabricated
+    1. dataset    exact match in the curated table -- reliable and free
+    2. llm        a model that can actually answer -- accurate, cached, costs money
+    3. dataset    whole-word match in the curated table -- free, but crude
+    4. heuristic  keyword family (dairy / meat / greens) -- free, cruder still
+       unknown    nothing matched; no date is fabricated
 
-Only tiers 3 and 4 go through the cache. Tiers 1 and 2 read a local file, so
-caching them would buy nothing and would mask edits to that file.
+The ordering is by expected accuracy, not by cost, with one exception: an exact
+curated entry outranks the model because it was chosen deliberately. Tiers 3 and 4
+sit below the model because they are pattern guesses; they remain as the offline
+path when no model is configured.
+
+Caching lives in the estimator rather than here, so the local tiers stay free to
+re-evaluate and edits to the curated file take effect immediately.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from datetime import timedelta
 from pathlib import Path
 from typing import Tuple
 
-import requests
-
 from app.core.config import settings
-from app.services.cache import MISS, Cache, get_cache
-
-# Namespace for cached external resolutions. Bumping the suffix invalidates every
-# previously cached answer, which is the escape hatch if the resolution logic
-# changes in a way that makes old values wrong.
-EXTERNAL_NAMESPACE = "shelf_life_external_v1"
+from app.services.llm_estimator import estimate_shelf_life_days
 
 # (path, mtime, parsed) -- keyed on mtime so editing the file during development
 # takes effect without a restart.
@@ -69,6 +65,34 @@ def _normalize_name(name: str) -> str:
     return name.strip().lower()
 
 
+def _lookup_exact(normalized: str) -> int | None:
+    return _load_dataset().get(normalized)
+
+
+def _lookup_by_token(normalized: str) -> int | None:
+    """Whole-word match, so "Whole wheat bread" can find the "bread" entry.
+
+    Also bridges classifier labels like "100_milk", which tokenise to
+    {"100", "milk"} and would otherwise match nothing.
+    """
+    dataset = _load_dataset()
+    if not dataset:
+        return None
+
+    tokens = set(re.findall(r"[a-z0-9]+", normalized))
+    candidates = []
+    for key, days in dataset.items():
+        if " " in key and key in normalized:
+            candidates.append((len(key), days))
+        elif key in tokens:
+            candidates.append((len(key), days))
+    if not candidates:
+        return None
+    # Longest matching key wins, so a specific entry beats a generic one.
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
 def _heuristic_fallback(name: str) -> int | None:
     name = _normalize_name(name)
     if any(token in name for token in ["milk", "cheese", "yogurt"]):
@@ -80,77 +104,24 @@ def _heuristic_fallback(name: str) -> int | None:
     return None
 
 
-def _fetch_from_web(name: str) -> int | None:
-    if not settings.shelf_life_api_key:
-        return None
-    try:
-        response = requests.get(
-            settings.shelf_life_api_url,
-            params={"query": name, "number": 1, "apiKey": settings.shelf_life_api_key},
-            timeout=6,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        # Spoonacular doesn't provide shelf-life directly; we use a conservative default.
-        if payload.get("results"):
-            return _heuristic_fallback(name) or 5
-    except requests.RequestException:
-        return None
-    return None
+def lookup_shelf_life_days(name: str, **estimator_kwargs) -> Tuple[int | None, str]:
+    """Days the item keeps, paired with the tier that produced the number."""
+    normalized = _normalize_name(name)
 
+    exact = _lookup_exact(normalized)
+    if exact is not None:
+        return exact, "dataset"
 
-def _lookup_dataset(normalized: str) -> int | None:
-    dataset = _load_dataset()
-    if normalized in dataset:
-        return dataset[normalized]
+    estimated = estimate_shelf_life_days(normalized, **estimator_kwargs)
+    if estimated is not None:
+        return estimated, "llm"
 
-    if dataset:
-        tokens = set(re.findall(r"[a-z0-9]+", normalized))
-        candidates = []
-        for key, days in dataset.items():
-            if " " in key and key in normalized:
-                candidates.append((len(key), days))
-            elif key in tokens:
-                candidates.append((len(key), days))
-        if candidates:
-            # Longest matching key wins, so a specific entry beats a generic one.
-            candidates.sort(reverse=True)
-            return candidates[0][1]
-    return None
-
-
-def _resolve_external(normalized: str) -> Tuple[int | None, str]:
-    """Tiers 3 and 4. Deliberately cacheable, including the negative result."""
-    web_value = _fetch_from_web(normalized)
-    if web_value is not None:
-        return web_value, "api"
+    by_token = _lookup_by_token(normalized)
+    if by_token is not None:
+        return by_token, "dataset"
 
     heuristic = _heuristic_fallback(normalized)
     if heuristic is not None:
         return heuristic, "heuristic"
 
     return None, "unknown"
-
-
-def lookup_shelf_life_days(
-    name: str, cache: Cache | None = None
-) -> Tuple[int | None, str]:
-    normalized = _normalize_name(name)
-
-    dataset_value = _lookup_dataset(normalized)
-    if dataset_value is not None:
-        return dataset_value, "dataset"
-
-    cache = cache if cache is not None else get_cache()
-    cached = cache.get(EXTERNAL_NAMESPACE, normalized)
-    if cached is not MISS:
-        return cached.get("days"), cached.get("source", "unknown")
-
-    days, source = _resolve_external(normalized)
-    cache.set(
-        EXTERNAL_NAMESPACE,
-        normalized,
-        {"days": days, "source": source},
-        ttl=timedelta(days=settings.cache_ttl_days),
-    )
-    return days, source
