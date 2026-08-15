@@ -18,6 +18,10 @@ _TMP_ROOT = Path(tempfile.mkdtemp(prefix="shelfit-tests-"))
 os.environ["DATABASE_URL"] = f"sqlite:///{_TMP_ROOT / 'import-time.db'}"
 os.environ["UPLOAD_DIR"] = str(_TMP_ROOT / "uploads")
 os.environ["MODEL_PATH"] = str(_TMP_ROOT / "model-that-does-not-exist.pt")
+# Point the curated files at paths that do not exist, so a test that does not
+# explicitly install a dataset cannot silently depend on the repo's real one.
+os.environ["SHELF_LIFE_PATH"] = str(_TMP_ROOT / "no-shelf-life.json")
+os.environ["CATEGORIES_PATH"] = str(_TMP_ROOT / "no-categories.json")
 # Unset by default so no code path can reach OpenAI unless a test opts in.
 os.environ["OPENAI_API_KEY"] = ""
 
@@ -74,17 +78,22 @@ def isolated_cache(monkeypatch):
     exercise caching opt in by constructing a real backend and passing it in.
     """
     from app.services import cache as cache_module
+    from app.services import category as category_module
+    from app.services import category_store as category_store_module
     from app.services import learned_store as learned_store_module
     from app.services import shelf_life as shelf_life_module
 
-    cache_module.reset_cache()
-    shelf_life_module.reset_dataset_cache()
-    learned_store_module.reset_learned_store()
+    def _reset():
+        cache_module.reset_cache()
+        shelf_life_module.reset_dataset_cache()
+        learned_store_module.reset_learned_store()
+        category_module.reset_category_dataset_cache()
+        category_store_module.reset_category_store()
+
+    _reset()
     monkeypatch.setattr(cache_module.settings, "cache_backend", "none")
     yield
-    cache_module.reset_cache()
-    shelf_life_module.reset_dataset_cache()
-    learned_store_module.reset_learned_store()
+    _reset()
 
 
 @pytest.fixture(autouse=True)

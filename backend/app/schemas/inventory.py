@@ -1,7 +1,9 @@
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Literal
 from pydantic import BaseModel, Field, computed_field
 
+from app.services.category import Category
 from app.services.urgency import Urgency, classify, days_until
 
 
@@ -22,7 +24,7 @@ class ExpirationOut(ExpirationBase):
 
 class InventoryItemBase(BaseModel):
     name: str
-    category: str | None = None
+    category: Category | None = None
     quantity: float = Field(default=1.0, ge=0)
     unit: str = Field(default="count")
 
@@ -34,13 +36,17 @@ class InventoryItemCreate(InventoryItemBase):
 
 class InventoryItemUpdate(BaseModel):
     name: str | None = None
-    category: str | None = None
+    category: Category | None = None
     quantity: float | None = Field(default=None, ge=0.01)
     unit: str | None = None
 
 
 class InventoryItemOut(InventoryItemBase):
     id: str
+    # Where the category came from: user, dataset, learned, llm, or unknown.
+    # Reported for the same reason as expiration source -- an inferred value and
+    # a stated one should not look identical.
+    category_source: str | None = None
     image_uri: str | None = None
     confidence: float | None = None
     created_at: datetime
@@ -79,6 +85,26 @@ class InventoryItemOut(InventoryItemBase):
         return self.expiration is None or self.expiration.expiration_date is None
 
 
+class ItemSort(StrEnum):
+    """How to order the inventory list.
+
+    There is no separate "expiration" option: ordering by expiry date and
+    ordering by urgency are the same ordering, and offering both names for one
+    behaviour invites them to drift apart.
+    """
+
+    URGENCY = "urgency"
+    NAME = "name"
+    CATEGORY = "category"
+    CREATED = "created"
+    QUANTITY = "quantity"
+
+
+class SortDirection(StrEnum):
+    ASC = "asc"
+    DESC = "desc"
+
+
 class ScanCandidate(BaseModel):
     """A detection the model was not confident enough to add automatically."""
 
@@ -114,6 +140,7 @@ class ReminderEntry(BaseModel):
 
     id: str
     name: str
+    category: Category | None = None
     quantity: float
     unit: str
     expiration_date: date
@@ -161,6 +188,7 @@ class DispositionOut(BaseModel):
     reason: str | None = None
     occurred_at: datetime
     item_name: str
+    item_category: str | None = None
     days_remaining: int | None = None
     expiration_date: date | None = None
 

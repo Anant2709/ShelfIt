@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     database_url: str = f"sqlite:///{DATA_DIR / 'shelfit.db'}"
     upload_dir: str = str(DATA_DIR / "uploads")
     shelf_life_path: str = str(DATA_DIR / "shelf_life.json")
+    categories_path: str = str(DATA_DIR / "categories.json")
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     model_path: str = str(DATA_DIR / "model.pt")

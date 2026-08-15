@@ -21,8 +21,12 @@ from app.services.disposition import (
 )
 
 
-def add_item(db, name="Milk", quantity=1.0, unit="l", days_from_today=5):
-    item = InventoryItem(name=name, quantity=quantity, unit=unit)
+def add_item(
+    db, name="Milk", quantity=1.0, unit="l", days_from_today=5, category="dairy"
+):
+    item = InventoryItem(
+        name=name, quantity=quantity, unit=unit, category=category
+    )
     db.add(item)
     db.flush()
     db.add(
@@ -46,6 +50,7 @@ def event(**overrides):
         item_id="x",
         outcome="wasted",
         item_name="Milk",
+        item_category="dairy",
         quantity=1.0,
         unit="l",
         days_remaining=-1,
@@ -88,6 +93,19 @@ class TestApplyDisposition:
         assert recorded.days_remaining == -3
         assert recorded.reason == "mould"
         assert recorded.unit == "l"
+
+    def test_category_is_snapshotted_at_disposal(self, db):
+        """Recategorising an item later must not rewrite last month's report."""
+        item = add_item(db, name="Yogurt", category="dairy")
+        recorded = apply_disposition(db, item, "wasted")
+        db.commit()
+        item.category = "produce"
+        db.commit()
+        assert recorded.item_category == "dairy"
+
+    def test_uncategorised_item_snapshots_no_category(self, db):
+        item = add_item(db, name="Leftover Curry", category=None)
+        assert apply_disposition(db, item, "wasted").item_category is None
 
     def test_undated_item_snapshots_unknown_days(self, db):
         item = add_item(db, name="Salt", days_from_today=None)
@@ -214,6 +232,69 @@ class TestSummariseWaste:
             window_days=30,
         )
         assert [row.name for row in report.by_name] == ["Yogurt"]
+
+    def test_by_category_groups_across_different_names(self):
+        """The point of categories: "mostly dairy" is not visible per name."""
+        report = summarise_waste(
+            [
+                event(item_name="Yogurt", item_category="dairy", item_id="a"),
+                event(item_name="Paneer", item_category="dairy", item_id="b"),
+                event(item_name="Lettuce", item_category="produce", item_id="c"),
+            ],
+            window_days=30,
+        )
+        assert [(row.category, row.events) for row in report.by_category] == [
+            ("dairy", 2),
+            ("produce", 1),
+        ]
+
+    def test_by_category_counts_distinct_items(self):
+        report = summarise_waste(
+            [
+                event(item_category="dairy", item_id="a"),
+                event(item_category="dairy", item_id="a"),
+            ],
+            window_days=30,
+        )
+        assert report.by_category[0].events == 2
+        assert report.by_category[0].items == 1
+
+    def test_uncategorised_waste_is_reported_as_null_not_dropped(self):
+        report = summarise_waste(
+            [event(item_category=None, item_name="Mystery Sauce")],
+            window_days=30,
+        )
+        assert report.by_category[0].category is None
+        assert report.by_category[0].events == 1
+
+    def test_uncategorised_never_leads_the_breakdown(self):
+        """It is the absence of a finding, so it must not read as the headline."""
+        report = summarise_waste(
+            [
+                event(item_category=None, item_id="a"),
+                event(item_category=None, item_id="b"),
+                event(item_category=None, item_id="c"),
+                event(item_category="dairy", item_id="d"),
+            ],
+            window_days=30,
+        )
+        assert report.by_category[0].category == "dairy"
+        assert report.by_category[-1].category is None
+
+    def test_by_category_carries_no_quantity(self):
+        """A category mixes litres with grams, so a total would mean nothing."""
+        report = summarise_waste([event()], window_days=30)
+        assert not hasattr(report.by_category[0], "quantity")
+
+    def test_by_category_ignores_consumed_events(self):
+        report = summarise_waste(
+            [
+                event(outcome="consumed", item_category="dairy"),
+                event(outcome="wasted", item_category="produce", item_id="b"),
+            ],
+            window_days=30,
+        )
+        assert [row.category for row in report.by_category] == ["produce"]
 
     def test_consumed_events_are_not_classified_by_expiry(self):
         report = summarise_waste(
@@ -454,6 +535,25 @@ class TestAnalyticsEndpoint:
         assert body["waste_rate"] == pytest.approx(0.5)
         assert body["wasted_after_expiry"] == 1
         assert body["by_name"][0]["name"] == "Yogurt"
+
+    def test_report_groups_waste_by_category(self, client, db):
+        for name, category in [
+            ("Yogurt", "dairy"),
+            ("Paneer", "dairy"),
+            ("Lettuce", "produce"),
+        ]:
+            item = add_item(db, name=name, category=category, days_from_today=-1)
+            apply_disposition(db, item, "wasted")
+        db.commit()
+        body = client.get("/api/analytics/waste").json()
+        assert body["by_category"][0] == {
+            "category": "dairy",
+            "events": 2,
+            "items": 2,
+        }
+
+    def test_empty_report_has_no_category_rows(self, client):
+        assert client.get("/api/analytics/waste").json()["by_category"] == []
 
     def test_events_outside_the_window_are_excluded(self, client, db, monkeypatch):
         now = datetime(2026, 8, 15, 12, 0, 0)

@@ -13,7 +13,11 @@ class InventoryItem(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String, nullable=False)
-    category: Mapped[str] = mapped_column(String, nullable=True)
+    # NULL means no category could be established. `category_source` still says
+    # what was tried, so "asked and could not tell" is distinguishable from
+    # "never asked".
+    category: Mapped[str] = mapped_column(String, nullable=True, index=True)
+    category_source: Mapped[str | None] = mapped_column(String, nullable=True)
     image_uri: Mapped[str | None] = mapped_column(String, nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     quantity: Mapped[float] = mapped_column(Float, default=1.0)
@@ -76,6 +80,7 @@ class Disposition(Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     # Snapshots so later edits to the item cannot rewrite history.
     item_name: Mapped[str] = mapped_column(String, nullable=False)
+    item_category: Mapped[str | None] = mapped_column(String, nullable=True)
     days_remaining: Mapped[int | None] = mapped_column(Integer, nullable=True)
     expiration_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 

@@ -94,6 +94,7 @@ def apply_disposition(
         reason=reason,
         occurred_at=when,
         item_name=item.name,
+        item_category=item.category,
         days_remaining=days_until(expiration_date, when.date()),
         expiration_date=expiration_date,
     )
@@ -125,6 +126,20 @@ class NameBreakdown:
 
 
 @dataclass(frozen=True)
+class CategoryBreakdown:
+    """Waste grouped by category. `category` is None for uncategorised items.
+
+    Counted in events only, with no quantity. Within a single name the unit is
+    usually stable, but a category mixes litres of milk with grams of paneer, so
+    a quantity here would be a number with no meaning.
+    """
+
+    category: str | None
+    events: int
+    items: int
+
+
+@dataclass(frozen=True)
 class WasteReport:
     window_days: int
     consumed: OutcomeTotals
@@ -134,6 +149,7 @@ class WasteReport:
     wasted_before_expiry: int
     wasted_undated: int
     by_name: tuple[NameBreakdown, ...]
+    by_category: tuple[CategoryBreakdown, ...]
 
 
 def _totals(events: list[Disposition]) -> OutcomeTotals:
@@ -168,6 +184,26 @@ def _wasted_by_name(events: Iterable[Disposition]) -> tuple[NameBreakdown, ...]:
             )
         )
     rows.sort(key=lambda row: (-row.events, row.name))
+    return tuple(rows)
+
+
+def _wasted_by_category(
+    events: Iterable[Disposition],
+) -> tuple[CategoryBreakdown, ...]:
+    grouped: dict[str | None, list[Disposition]] = defaultdict(list)
+    for event in events:
+        grouped[event.item_category].append(event)
+
+    rows = [
+        CategoryBreakdown(
+            category=category,
+            events=len(group),
+            items=len({event.item_id for event in group}),
+        )
+        for category, group in grouped.items()
+    ]
+    # Uncategorised last, so it never leads the story by accident.
+    rows.sort(key=lambda row: (row.category is None, -row.events, row.category or ""))
     return tuple(rows)
 
 
@@ -206,6 +242,7 @@ def summarise_waste(
         wasted_before_expiry=before,
         wasted_undated=undated,
         by_name=_wasted_by_name(wasted),
+        by_category=_wasted_by_category(wasted),
     )
 
 

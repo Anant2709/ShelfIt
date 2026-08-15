@@ -27,13 +27,13 @@ the answer outright.
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Tuple
 
 from app.core.config import settings
 from app.services.learned_store import LearnedShelfLifeStore, get_learned_store
 from app.services.llm_estimator import resolve_shelf_life
+from app.services.retrieval import top_matches
 
 # How many known items to offer the model as reference material.
 MAX_CANDIDATES = 8
@@ -74,23 +74,6 @@ def _normalize_name(name: str) -> str:
     return name.strip().lower()
 
 
-def _tokens(value: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9]+", value))
-
-
-def _relevance(key: str, name: str, name_tokens: set[str]) -> int:
-    """How likely a known item is to be a useful reference for `name`.
-
-    Only used for retrieval, so being approximate is acceptable.
-    """
-    if key in name:
-        # A contained phrase is the strongest signal, weighted by its length so a
-        # specific match outranks a generic one.
-        return 100 + len(key)
-    shared = len(_tokens(key) & name_tokens)
-    return shared * 10 if shared else 0
-
-
 def _retrieve_candidates(
     normalized: str, store: LearnedShelfLifeStore
 ) -> dict[str, int]:
@@ -101,16 +84,7 @@ def _retrieve_candidates(
     for entry in store.all():
         known[entry.name] = entry.days
     known.update(_load_dataset())
-
-    name_tokens = _tokens(normalized)
-    scored = [
-        (_relevance(key, normalized, name_tokens), key, days)
-        for key, days in known.items()
-    ]
-    relevant = sorted(
-        (item for item in scored if item[0] > 0), key=lambda item: -item[0]
-    )
-    return {key: days for _, key, days in relevant[:MAX_CANDIDATES]}
+    return top_matches(normalized, known, MAX_CANDIDATES)
 
 
 def lookup_shelf_life_days(

@@ -11,7 +11,7 @@ exact day count -- though the day count is returned too, for sorting and copy.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from enum import StrEnum
 
 # Boundaries, in days from today.
@@ -66,6 +66,39 @@ def classify(expiration_date: date | None, today: date | None = None) -> Urgency
     if remaining <= THIS_WEEK_THRESHOLD:
         return Urgency.THIS_WEEK
     return Urgency.LATER
+
+
+def bucket_bounds(
+    urgency: Urgency, today: date | None = None
+) -> tuple[date | None, date | None] | None:
+    """The inclusive date range a bucket covers, for filtering in the database.
+
+    `None` for either bound means unbounded on that side. `None` in place of the
+    whole range means the bucket is not a date range at all -- only UNKNOWN,
+    which is the absence of a date and must be matched as NULL instead.
+
+    Derived from the same thresholds as `classify`, and tested against it across
+    a wide span of offsets, because two independent spellings of one rule are a
+    standing invitation for the filter and the label to disagree.
+    """
+    reference = today or date.today()
+    if urgency is Urgency.UNKNOWN:
+        return None
+    if urgency is Urgency.EXPIRED:
+        return (None, reference - timedelta(days=1))
+    if urgency is Urgency.TODAY:
+        return (reference, reference)
+    if urgency is Urgency.SOON:
+        return (
+            reference + timedelta(days=1),
+            reference + timedelta(days=SOON_THRESHOLD),
+        )
+    if urgency is Urgency.THIS_WEEK:
+        return (
+            reference + timedelta(days=SOON_THRESHOLD + 1),
+            reference + timedelta(days=THIS_WEEK_THRESHOLD),
+        )
+    return (reference + timedelta(days=THIS_WEEK_THRESHOLD + 1), None)
 
 
 def sort_key(expiration_date: date | None, today: date | None = None) -> tuple:

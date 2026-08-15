@@ -16,7 +16,6 @@ from app.services.llm_estimator import Resolution
 from app.services.shelf_life import (
     MAX_CANDIDATES,
     _normalize_name,
-    _relevance,
     _retrieve_candidates,
     lookup_shelf_life_days,
 )
@@ -269,25 +268,7 @@ class TestCandidateRetrieval:
         assert calls[0]["candidates"] == {}
 
 
-class TestRelevance:
-    def test_contained_phrase_outranks_a_shared_token(self):
-        tokens = {"whole", "wheat", "bread"}
-        assert _relevance("wheat bread", "whole wheat bread", tokens) > _relevance(
-            "bread", "whole wheat bread", tokens
-        )
-
-    def test_longer_contained_phrase_outranks_a_shorter_one(self):
-        tokens = {"whole", "wheat", "bread"}
-        assert _relevance("wheat bread", "whole wheat bread", tokens) > _relevance(
-            "wheat", "whole wheat bread", tokens
-        )
-
-    def test_unrelated_key_scores_zero(self):
-        assert _relevance("ketchup", "baby spinach", {"baby", "spinach"}) == 0
-
-    def test_shared_token_scores_above_zero(self):
-        assert _relevance("spinach", "baby spinach", {"baby", "spinach"}) > 0
-
+class TestRetrieval:
     def test_retrieval_orders_most_relevant_first(self, dataset, store):
         dataset({"bread": 7, "wheat bread": 3, "milk": 5})
         candidates = _retrieve_candidates("whole wheat bread", store)

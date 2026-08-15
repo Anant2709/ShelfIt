@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.deps import get_db
 from app.schemas.analytics import (
+    CategoryBreakdownOut,
     NameBreakdownOut,
     OutcomeTotalsOut,
     WasteReportOut,
@@ -38,5 +39,11 @@ def get_waste_report(days: int = 30, db: Session = Depends(get_db)):
                 unit=row.unit,
             )
             for row in report.by_name
+        ],
+        by_category=[
+            CategoryBreakdownOut(
+                category=row.category, events=row.events, items=row.items
+            )
+            for row in report.by_category
         ],
     )

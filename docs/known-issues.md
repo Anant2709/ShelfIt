@@ -7,6 +7,43 @@ document explains the reasoning.
 
 ## Open
 
+### The two resolvers disagree about what counts as a grocery
+
+**Where:** `backend/app/services/llm_estimator.py` and
+`backend/app/services/llm_categorizer.py`
+
+Observed live: adding "Dish Soap" produced no category — correctly refused, it is not
+food — while the shelf-life resolver gave it 365 days without hesitation. Both
+answers are individually defensible, since soap does have a shelf life, but the pair
+is incoherent: one resolver decided the item was out of domain and the other did not.
+
+The categoriser refuses more readily because it picks from a closed set and anything
+off it is discarded, whereas shelf life accepts any integer in a wide range. So the
+constraint that makes categories trustworthy is also what makes the two disagree.
+
+Nothing is corrupted by this today — an uncategorised item is still listed, filtered,
+and reported. It matters because "is this even a grocery" is currently answered twice,
+independently, by two prompts that cannot see each other.
+
+**Fix direction:** decide domain membership once, before either resolver runs, and
+have both honour that answer.
+
+### Learned categories cannot be reviewed or promoted
+
+**Where:** `backend/app/services/category_store.py`
+
+Learned shelf lives have `scripts/review_shelf_life.py`: list what was learned, correct
+it, promote it into the curated file so it ships with the repo. Learned categories have
+the storage and the provenance but no equivalent tooling, so a wrong category can only
+be fixed per-item through the API, and a correct one never graduates to curated data
+that a fresh install would inherit.
+
+The store already exposes what a review script needs, and `confirmed_at` exists and is
+never set by anything.
+
+**Fix direction:** the same script shape as `review_shelf_life`, minus the staleness
+check, which has no meaning without anchors.
+
 ### No offline shelf-life inference
 
 **Where:** `backend/app/services/shelf_life.py`
@@ -30,6 +67,12 @@ Worth knowing because it is a visible behaviour difference if the key is missing
 Schema is created by `Base.metadata.create_all()` at import time. That handles a
 fresh database but cannot evolve one, so any model change requires deleting
 `data/shelfit.db`. Blocks any deployment that must preserve data.
+
+This has now bitten twice in development. Adding `category_source` to
+`inventory_items` made every query fail with `no such column`, and the only recovery
+was moving the database aside and reseeding — losing whatever was in it. On a real
+deployment that would have been data loss rather than an inconvenience, which is the
+reason this is listed as blocking rather than untidy.
 
 **Fix direction:** Alembic, introduced alongside the move to Postgres.
 

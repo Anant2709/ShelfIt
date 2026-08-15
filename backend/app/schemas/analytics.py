@@ -15,6 +15,13 @@ class NameBreakdownOut(BaseModel):
     unit: str | None = None
 
 
+class CategoryBreakdownOut(BaseModel):
+    # Null for items whose category could not be established.
+    category: str | None = None
+    events: int
+    items: int
+
+
 class WasteReportOut(BaseModel):
     """Waste over a trailing window, counted in events rather than money.
 
@@ -31,3 +38,4 @@ class WasteReportOut(BaseModel):
     wasted_before_expiry: int
     wasted_undated: int
     by_name: list[NameBreakdownOut] = Field(default_factory=list)
+    by_category: list[CategoryBreakdownOut] = Field(default_factory=list)

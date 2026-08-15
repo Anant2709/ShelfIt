@@ -7,6 +7,7 @@ produce a spread of expiry horizons and must be safely re-runnable.
 from datetime import date
 
 from app.models.inventory import Disposition, Expiration, InventoryItem
+from app.services.category import ASSIGNABLE
 from scripts.seed import DEMO_HISTORY, DEMO_ITEMS, main, seed
 
 
@@ -130,10 +131,32 @@ def test_seed_manages_its_own_session_when_none_is_given(monkeypatch):
 
 def test_every_demo_item_declares_a_provenance():
     valid = {"user", "dataset", "llm", "unknown"}
-    for name, _, _, _, source in DEMO_ITEMS:
-        assert source in valid, f"{name} has unrecognised provenance {source!r}"
+    for entry in DEMO_ITEMS:
+        assert entry.source in valid, (
+            f"{entry.name} has unrecognised provenance {entry.source!r}"
+        )
     assert "api" not in valid
     assert "heuristic" not in valid
+
+
+def test_every_demo_category_is_a_real_category():
+    """A typo here would create a category no filter could ever select."""
+    for entry in list(DEMO_ITEMS) + list(DEMO_HISTORY):
+        if entry.category is not None:
+            assert entry.category in ASSIGNABLE, (
+                f"{entry.name} has unrecognised category {entry.category!r}"
+            )
+
+
+def test_demo_data_covers_the_uncategorised_case(db):
+    """The list and the report both have to render an item with no category."""
+    seed(reset=True, session=db)
+    assert (
+        db.query(InventoryItem).filter(InventoryItem.category.is_(None)).count() >= 1
+    )
+    assert (
+        db.query(Disposition).filter(Disposition.item_category.is_(None)).count() >= 1
+    )
 
 
 def test_history_items_are_resolved_and_live_items_are_not(db):
@@ -150,5 +173,5 @@ def test_history_items_are_resolved_and_live_items_are_not(db):
             InventoryItem.resolved_at.isnot(None)
         )
     }
-    assert live == {name for name, *_ in DEMO_ITEMS}
-    assert resolved == {name for name, *_ in DEMO_HISTORY}
+    assert live == {entry.name for entry in DEMO_ITEMS}
+    assert resolved == {entry.name for entry in DEMO_HISTORY}

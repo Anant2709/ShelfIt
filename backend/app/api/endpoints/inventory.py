@@ -3,7 +3,8 @@ import json
 import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.core.clock import epoch_seconds, utcnow
@@ -21,10 +22,13 @@ from app.schemas.inventory import (
     InventoryItemOut,
     InventoryScanResponse,
     InventoryItemUpdate,
+    ItemSort,
     ReminderEntry,
     RemindersResponse,
     ScanCandidate,
+    SortDirection,
 )
+from app.services.category import Category, lookup_category
 from app.services.disposition import (
     AlreadyResolvedError,
     DispositionError,
@@ -38,7 +42,14 @@ from app.services.classifier import (
     detect_items,
 )
 from app.services.shelf_life import lookup_shelf_life_days
-from app.services.urgency import URGENCY_ORDER, classify, days_until, is_actionable
+from app.services.urgency import (
+    URGENCY_ORDER,
+    Urgency,
+    bucket_bounds,
+    classify,
+    days_until,
+    is_actionable,
+)
 
 router = APIRouter()
 
@@ -59,14 +70,34 @@ def _persist_upload(file: UploadFile) -> Path:
     return file_path
 
 
+def _set_user_category(item: InventoryItem, value: Category | None) -> None:
+    """Record a category the user stated, including an explicit "unknown".
+
+    UNKNOWN is stored as NULL so there is one representation of "no category" in
+    the database, but the source is still `user`, which stops inference from
+    later overriding a deliberate answer.
+    """
+    item.category = None if value in (None, Category.UNKNOWN) else value.value
+    item.category_source = "user"
+
+
+def _infer_category(item: InventoryItem) -> None:
+    category, source = lookup_category(item.name)
+    item.category = category.value if category is not None else None
+    item.category_source = source
+
+
 @router.post("/", response_model=InventoryItemOut)
 def create_item(payload: InventoryItemCreate, db: Session = Depends(get_db)):
     item = InventoryItem(
         name=payload.name,
-        category=payload.category,
         quantity=payload.quantity,
         unit=payload.unit,
     )
+    if payload.category is not None:
+        _set_user_category(item, payload.category)
+    else:
+        _infer_category(item)
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -75,15 +106,111 @@ def create_item(payload: InventoryItemCreate, db: Session = Depends(get_db)):
     return item
 
 
+def _urgency_predicate(urgency: Urgency, today: date):
+    """One urgency bucket expressed as a condition on the expiration row.
+
+    The bounds come from `bucket_bounds` rather than being written again here, so
+    the filter cannot disagree with the label the same item is shown with.
+    """
+    bounds = bucket_bounds(urgency, today)
+    if bounds is None:
+        # UNKNOWN covers both "no expiration row" and "a row with no date".
+        return or_(
+            Expiration.item_id.is_(None), Expiration.expiration_date.is_(None)
+        )
+    low, high = bounds
+    conditions = [Expiration.expiration_date.isnot(None)]
+    if low is not None:
+        conditions.append(Expiration.expiration_date >= low)
+    if high is not None:
+        conditions.append(Expiration.expiration_date <= high)
+    return and_(*conditions)
+
+
+def _apply_sort(query, sort: ItemSort, direction: SortDirection):
+    """Order the list, keeping undated and uncategorised items at the end.
+
+    Direction applies to the value being sorted, not to whether a value exists.
+    An item with no expiry date is not the most urgent or the least urgent, it is
+    unknown, so it belongs last either way; the same holds for a missing
+    category. Sorting a gap as though it were a value is how "unknown" ends up
+    presented as "fine".
+    """
+    if sort is ItemSort.NAME:
+        primary = func.lower(InventoryItem.name)
+        nulls_last = None
+    elif sort is ItemSort.CREATED:
+        primary = InventoryItem.created_at
+        nulls_last = None
+    elif sort is ItemSort.QUANTITY:
+        primary = InventoryItem.quantity
+        nulls_last = None
+    elif sort is ItemSort.CATEGORY:
+        primary = InventoryItem.category
+        nulls_last = InventoryItem.category.is_(None)
+    else:
+        primary = Expiration.expiration_date
+        nulls_last = Expiration.expiration_date.is_(None)
+
+    ordered = primary.desc() if direction is SortDirection.DESC else primary.asc()
+    keys = [ordered] if nulls_last is None else [nulls_last, ordered]
+    # Final tiebreaker so equal keys produce a stable order across requests.
+    return query.order_by(*keys, InventoryItem.id)
+
+
 @router.get("/", response_model=list[InventoryItemOut])
 def list_items(
+    search: str | None = None,
+    category: list[Category] | None = Query(default=None),
+    urgency: list[Urgency] | None = Query(default=None),
+    sort: ItemSort = ItemSort.URGENCY,
+    direction: SortDirection = SortDirection.ASC,
     include_resolved: bool = False,
     db: Session = Depends(get_db),
 ):
-    query = db.query(InventoryItem)
+    """The current shelf, filtered and ordered.
+
+    Filtering and ordering happen in the database rather than in the client, so
+    every client agrees and the rules stay testable without a browser. The
+    outer join is what lets an item with no expiration row still be returned,
+    matched by the `unknown` urgency filter, and sorted to the end.
+    """
+    query = db.query(InventoryItem).outerjoin(
+        Expiration, InventoryItem.id == Expiration.item_id
+    )
+
     if not include_resolved:
         query = query.filter(InventoryItem.resolved_at.is_(None))
-    return query.all()
+
+    if search:
+        # Case-insensitive substring. Escaped so a name containing % or _ is
+        # matched literally instead of behaving as a wildcard.
+        pattern = (
+            search.strip().lower().replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        )
+        query = query.filter(
+            func.lower(InventoryItem.name).like(f"%{pattern}%", escape="!")
+        )
+
+    if category:
+        requested = set(category)
+        conditions = []
+        if Category.UNKNOWN in requested:
+            conditions.append(InventoryItem.category.is_(None))
+            requested.discard(Category.UNKNOWN)
+        if requested:
+            conditions.append(
+                InventoryItem.category.in_([item.value for item in requested])
+            )
+        query = query.filter(or_(*conditions))
+
+    if urgency:
+        today = date.today()
+        query = query.filter(
+            or_(*[_urgency_predicate(bucket, today) for bucket in set(urgency)])
+        )
+
+    return _apply_sort(query, sort, direction).all()
 
 
 @router.get("/reminders", response_model=RemindersResponse)
@@ -116,6 +243,7 @@ def reminders(
         ReminderEntry(
             id=item.id,
             name=item.name,
+            category=item.category,
             quantity=item.quantity,
             unit=item.unit,
             expiration_date=expiration.expiration_date,
@@ -170,8 +298,20 @@ def update_item(item_id: str, payload: InventoryItemUpdate, db: Session = Depend
         raise HTTPException(
             status_code=409, detail="Resolved items cannot be edited"
         )
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(item, field, value)
+
+    changes = payload.model_dump(exclude_unset=True)
+    for field, value in changes.items():
+        if field != "category":
+            setattr(item, field, value)
+
+    if "category" in changes:
+        _set_user_category(item, changes["category"])
+    elif "name" in changes and item.category_source != "user":
+        # A rename changes what the item *is*, so an inferred category is now
+        # about the old name. A user-stated one is left alone: renaming is not
+        # a licence to overwrite an answer the user gave.
+        _infer_category(item)
+
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -259,12 +399,12 @@ def scan_item(
     for detection in confident:
         item = InventoryItem(
             name=detection.label,
-            category=None,
             quantity=quantity,
             unit=unit,
             image_uri=str(file_path),
             confidence=detection.confidence,
         )
+        _infer_category(item)
         db.add(item)
         db.commit()
         db.refresh(item)
@@ -330,12 +470,12 @@ def label_item(payload: InventoryLabelRequest, db: Session = Depends(get_db)):
 
     item = InventoryItem(
         name=payload.label,
-        category=None,
         quantity=payload.quantity,
         unit=payload.unit,
         image_uri=str(file_path),
         confidence=None,
     )
+    _infer_category(item)
     db.add(item)
     db.commit()
     db.refresh(item)
