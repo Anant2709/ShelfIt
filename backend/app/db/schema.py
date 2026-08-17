@@ -39,6 +39,11 @@ ALEMBIC_DIR = BACKEND_ROOT / "alembic"
 ALEMBIC_INI = BACKEND_ROOT / "alembic.ini"
 
 
+def escape_configparser(value: str) -> str:
+    """ConfigParser treats `%` as interpolation. Encode it so URLs survive."""
+    return value.replace("%", "%%")
+
+
 def alembic_config(database_url: str | None = None) -> Config:
     """Alembic config with absolute paths.
 
@@ -48,7 +53,10 @@ def alembic_config(database_url: str | None = None) -> Config:
     """
     config = Config(str(ALEMBIC_INI))
     config.set_main_option("script_location", str(ALEMBIC_DIR))
-    config.set_main_option("sqlalchemy.url", database_url or settings.database_url)
+    # ConfigParser treats `%` as interpolation. URL-encoded passwords (`%40`
+    # for `@`) are otherwise rejected before Alembic ever opens a connection.
+    url = database_url or settings.database_url
+    config.set_main_option("sqlalchemy.url", escape_configparser(url))
     # Everything reached through here is in-process, where the caller already owns
     # logging. env.py reads this and leaves the root logger alone.
     config.attributes["configure_logging"] = False

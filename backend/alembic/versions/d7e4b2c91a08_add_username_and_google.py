@@ -29,11 +29,17 @@ def upgrade() -> None:
             "password_hash", existing_type=sa.String(), nullable=True
         )
 
+    # SQLite has `instr`; Postgres has `split_part`. The local-part of the
+    # email is the same on both, so existing rows (the demo kitchen) keep a
+    # login name without a dialect-specific helper in the app.
+    dialect = op.get_bind().dialect.name
+    local_part = (
+        "lower(substr(email, 1, instr(email, '@') - 1))"
+        if dialect == "sqlite"
+        else "lower(split_part(email, '@', 1))"
+    )
     op.execute(
-        sa.text(
-            "UPDATE users SET username = lower(substr(email, 1, "
-            "instr(email, '@') - 1)) WHERE username IS NULL"
-        )
+        sa.text(f"UPDATE users SET username = {local_part} WHERE username IS NULL")
     )
     op.execute(sa.text("UPDATE users SET username = 'user' WHERE username IS NULL OR username = ''"))
 

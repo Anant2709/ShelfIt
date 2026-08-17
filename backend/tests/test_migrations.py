@@ -419,6 +419,11 @@ class TestSchemaHelpers:
         config = schema.alembic_config("sqlite:///supplied.db")
         assert config.get_main_option("sqlalchemy.url") == "sqlite:///supplied.db"
 
+    def test_percent_encoded_passwords_survive_alembic_configparser(self):
+        url = "postgresql+psycopg://user:p%40ss@host/db?sslmode=require"
+        config = schema.alembic_config(url)
+        assert config.get_main_option("sqlalchemy.url") == url
+
     def test_it_falls_back_to_the_configured_database(self):
         from app.core.config import settings
 

@@ -19,6 +19,7 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 from app.core.config import settings
+from app.db.schema import escape_configparser
 
 # Imports the model package rather than just Base, so every table is registered on
 # the metadata before autogenerate compares it against the database. Importing only
@@ -50,7 +51,7 @@ def _database_url() -> str:
     return config.get_main_option("sqlalchemy.url", None) or settings.database_url
 
 
-config.set_main_option("sqlalchemy.url", _database_url())
+config.set_main_option("sqlalchemy.url", escape_configparser(_database_url()))
 
 target_metadata = Base.metadata
 
