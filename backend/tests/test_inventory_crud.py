@@ -2,6 +2,8 @@
 
 from datetime import date, timedelta
 
+from app.core import clock
+
 import pytest
 
 from app.models.inventory import Expiration, InventoryItem
@@ -12,7 +14,7 @@ def make_payload(**overrides):
         "name": "Milk",
         "quantity": 1.0,
         "unit": "l",
-        "expiration_date": str(date.today() + timedelta(days=5)),
+        "expiration_date": str(clock.today() + timedelta(days=5)),
     }
     payload.update(overrides)
     return payload
@@ -33,7 +35,7 @@ class TestCreate:
         assert body["id"].count("-") == 4
 
     def test_user_supplied_date_is_recorded_with_user_provenance(self, client):
-        target = str(date.today() + timedelta(days=9))
+        target = str(clock.today() + timedelta(days=9))
         body = client.post(
             "/api/inventory/", json=make_payload(expiration_date=target)
         ).json()
@@ -43,7 +45,7 @@ class TestCreate:
     def test_defaults_are_applied(self, client):
         body = client.post(
             "/api/inventory/",
-            json={"name": "Eggs", "expiration_date": str(date.today())},
+            json={"name": "Eggs", "expiration_date": str(clock.today())},
         ).json()
         assert body["quantity"] == 1.0
         assert body["unit"] == "count"
@@ -124,7 +126,7 @@ class TestUpdate:
         original = created["expiration"]["expiration_date"]
         body = client.patch(
             f"/api/inventory/{created['id']}",
-            json={"expiration_date": str(date.today() + timedelta(days=99))},
+            json={"expiration_date": str(clock.today() + timedelta(days=99))},
         ).json()
         assert body["expiration"]["expiration_date"] == original
 
@@ -152,7 +154,7 @@ class TestSetExpiration:
         created = client.post(
             "/api/inventory/", json={"name": "Tofu", "quantity": 1}
         ).json()
-        target = str(date.today() + timedelta(days=4))
+        target = str(clock.today() + timedelta(days=4))
         response = client.post(
             f"/api/inventory/{created['id']}/expiration",
             json={"expiration_date": target},
@@ -172,14 +174,14 @@ class TestSetExpiration:
         for offset in (3, 8):
             client.post(
                 f"/api/inventory/{created['id']}/expiration",
-                json={"expiration_date": str(date.today() + timedelta(days=offset))},
+                json={"expiration_date": str(clock.today() + timedelta(days=offset))},
             )
         assert db.query(Expiration).count() == 1
 
     def test_expiration_for_unknown_item_returns_404(self, client):
         response = client.post(
             "/api/inventory/nope/expiration",
-            json={"expiration_date": str(date.today())},
+            json={"expiration_date": str(clock.today())},
         )
         assert response.status_code == 404
 
@@ -187,10 +189,10 @@ class TestSetExpiration:
 class TestInferredExpiration:
     def test_omitting_a_date_triggers_inference(self, client, monkeypatch):
         """With no user date, the cascade supplies one and records its source."""
-        from app.api.endpoints import inventory as inventory_endpoint
+        from app.services import inventory as inventory_service
 
         monkeypatch.setattr(
-            inventory_endpoint, "lookup_shelf_life_days", lambda name: (6, "dataset")
+            inventory_service, "lookup_shelf_life_days", lambda name: (6, "dataset")
         )
         body = client.post(
             "/api/inventory/", json={"name": "Mystery", "quantity": 1}
@@ -198,14 +200,14 @@ class TestInferredExpiration:
         assert body["expiration"]["source"] == "dataset"
         assert body["expiration"]["shelf_life_days"] == 6
         assert body["expiration"]["expiration_date"] == str(
-            date.today() + timedelta(days=6)
+            clock.today() + timedelta(days=6)
         )
 
     def test_unknown_item_gets_no_fabricated_date(self, client, monkeypatch):
-        from app.api.endpoints import inventory as inventory_endpoint
+        from app.services import inventory as inventory_service
 
         monkeypatch.setattr(
-            inventory_endpoint, "lookup_shelf_life_days", lambda name: (None, "unknown")
+            inventory_service, "lookup_shelf_life_days", lambda name: (None, "unknown")
         )
         body = client.post(
             "/api/inventory/", json={"name": "Saffron", "quantity": 1}
@@ -215,7 +217,7 @@ class TestInferredExpiration:
 
 
 def test_item_model_defaults(db):
-    item = InventoryItem(name="Rice")
+    item = InventoryItem(name="Rice", user_id=db.info["user"].id)
     db.add(item)
     db.commit()
     db.refresh(item)

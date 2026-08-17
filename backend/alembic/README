@@ -1,0 +1,37 @@
+# Schema migrations
+
+The schema is owned by the revisions in `versions/`, not by
+`Base.metadata.create_all()`. That call creates missing tables and never looks
+inside one it decides already exists, which is how adding `dispositions.source`
+broke every query against a database that already had the table.
+
+## Everyday use
+
+From `backend/`:
+
+```bash
+python -m scripts.migrate          # apply outstanding revisions, or adopt a pre-migration file
+alembic revision --autogenerate -m "add users"
+# review the generated file, then
+python -m scripts.migrate
+```
+
+`alembic.ini` holds no database URL. `env.py` reads it from the same settings the
+app uses, so `DATABASE_URL` applies to both.
+
+SQLite cannot do most `ALTER TABLE` operations on a populated table. `env.py`
+enables batch mode so those become create-copy-swap. That is a no-op on Postgres.
+
+## Adopting an existing database
+
+A file created before migrations has the tables and no `alembic_version` row.
+`alembic upgrade head` fails on the first `CREATE TABLE`. `scripts.migrate`
+detects that case, checks the live schema against the models, and *stamps* the
+baseline if they match. A mismatch is refused: stamping it would claim the
+database is current when a column is missing.
+
+## What the app does on startup
+
+Nothing to the schema. It logs whether the database is at the expected revision
+and leaves it alone. Silently migrating on boot is the same class of mistake as
+`create_all`.

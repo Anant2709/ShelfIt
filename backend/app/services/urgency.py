@@ -12,6 +12,10 @@ exact day count -- though the day count is returned too, for sorting and copy.
 from __future__ import annotations
 
 from datetime import date, timedelta
+
+# Imported as a module because the functions below take a parameter named `today`,
+# which would shadow a direct import of it.
+from app.core import clock
 from enum import StrEnum
 
 # Boundaries, in days from today.
@@ -48,7 +52,7 @@ def days_until(expiration_date: date | None, today: date | None = None) -> int |
     """Days remaining, negative if already past. None when there is no date."""
     if expiration_date is None:
         return None
-    return (expiration_date - (today or date.today())).days
+    return (expiration_date - (today or clock.today())).days
 
 
 def classify(expiration_date: date | None, today: date | None = None) -> Urgency:
@@ -81,7 +85,7 @@ def bucket_bounds(
     a wide span of offsets, because two independent spellings of one rule are a
     standing invitation for the filter and the label to disagree.
     """
-    reference = today or date.today()
+    reference = today or clock.today()
     if urgency is Urgency.UNKNOWN:
         return None
     if urgency is Urgency.EXPIRED:

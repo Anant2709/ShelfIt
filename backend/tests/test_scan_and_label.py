@@ -7,6 +7,8 @@ API refuses to guess, asks the user, and turns the correction into training data
 import json
 from datetime import date, timedelta
 
+from app.core import clock
+
 import pytest
 
 from app.api.endpoints import inventory as inventory_endpoint
@@ -146,7 +148,7 @@ class TestScanPersistence:
         self, client, uploads_dir, sample_image_bytes, stub_classifier
     ):
         stub_classifier("milk", 0.95)
-        target = str(date.today() + timedelta(days=3))
+        target = str(clock.today() + timedelta(days=3))
         item = post_scan(
             client, sample_image_bytes, expiration_date=target
         ).json()["item"]
@@ -210,14 +212,16 @@ class TestMultiItemScan:
     def test_each_created_item_gets_its_own_expiration(
         self, client, uploads_dir, sample_image_bytes, stub_classifier, monkeypatch
     ):
+        from app.services import inventory as inventory_service
+
         monkeypatch.setattr(
-            inventory_endpoint, "lookup_shelf_life_days", lambda name: (4, "dataset")
+            inventory_service, "lookup_shelf_life_days", lambda name: (4, "dataset")
         )
         stub_classifier(("milk", 0.95), ("bread", 0.91))
         body = post_scan(client, sample_image_bytes).json()
         for item in body["created_items"]:
             assert item["expiration"]["expiration_date"] == str(
-                date.today() + timedelta(days=4)
+                clock.today() + timedelta(days=4)
             )
 
     def test_mixed_confidence_splits_created_from_candidates(
@@ -404,14 +408,16 @@ class TestManualLabel:
     def test_label_applies_the_shelf_life_cascade(
         self, client, uploads_dir, sample_image_bytes, stub_classifier, monkeypatch
     ):
+        from app.services import inventory as inventory_service
+
         monkeypatch.setattr(
-            inventory_endpoint, "lookup_shelf_life_days", lambda name: (4, "dataset")
+            inventory_service, "lookup_shelf_life_days", lambda name: (4, "dataset")
         )
         image_id = self.scan_to_get_image_id(client, sample_image_bytes, stub_classifier)
         body = self.label(client, image_id).json()
         assert body["expiration"]["source"] == "dataset"
         assert body["expiration"]["expiration_date"] == str(
-            date.today() + timedelta(days=4)
+            clock.today() + timedelta(days=4)
         )
 
     def test_label_requires_a_non_empty_label(self, client, uploads_dir):
@@ -428,7 +434,7 @@ class TestUploadImageToExistingItem:
         stub_classifier("milk", 0.88)
         created = client.post(
             "/api/inventory/",
-            json={"name": "Milk", "quantity": 1, "expiration_date": str(date.today())},
+            json={"name": "Milk", "quantity": 1, "expiration_date": str(clock.today())},
         ).json()
         response = client.post(
             f"/api/inventory/{created['id']}/image",
@@ -445,7 +451,7 @@ class TestUploadImageToExistingItem:
     ):
         """Items literally named 'unknown' adopt the model's suggestion."""
         stub_classifier("bread", 0.9)
-        item = InventoryItem(name="unknown")
+        item = InventoryItem(name="unknown", user_id=db.info["user"].id)
         db.add(item)
         db.commit()
         response = client.post(

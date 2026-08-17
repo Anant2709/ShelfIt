@@ -6,6 +6,8 @@ produce a spread of expiry horizons and must be safely re-runnable.
 
 from datetime import date
 
+from app.core import clock
+
 from app.models.inventory import Disposition, Expiration, InventoryItem
 from app.services.category import ASSIGNABLE
 from scripts.seed import DEMO_HISTORY, DEMO_ITEMS, main, seed
@@ -48,8 +50,11 @@ def test_seed_with_reset_replaces(db):
 def test_demo_data_spans_every_urgency_horizon(db):
     """Guards the property the demo depends on."""
     seed(reset=True, session=db)
+    from app.core.config import settings
+
+    today = clock.today(settings.demo_timezone)
     offsets = [
-        (row.expiration_date - date.today()).days
+        (row.expiration_date - today).days
         for row in db.query(Expiration).all()
         if row.expiration_date is not None
     ]
@@ -92,6 +97,9 @@ def test_seed_manages_its_own_session_when_none_is_given(monkeypatch):
         def __init__(self):
             self.closed = False
 
+        def get(self, *_):
+            return None
+
         def add(self, *_):
             pass
 
@@ -99,6 +107,9 @@ def test_seed_manages_its_own_session_when_none_is_given(monkeypatch):
             pass
 
         def commit(self):
+            pass
+
+        def refresh(self, *_):
             pass
 
         def query(self, *_):
@@ -112,6 +123,9 @@ def test_seed_manages_its_own_session_when_none_is_given(monkeypatch):
                 def count(self):
                     return 0
 
+                def one_or_none(self):
+                    return None
+
             return Q()
 
         def close(self):
@@ -119,7 +133,7 @@ def test_seed_manages_its_own_session_when_none_is_given(monkeypatch):
 
     spy = SpySession()
     monkeypatch.setattr(seed_module, "SessionLocal", lambda: spy)
-    monkeypatch.setattr(seed_module.Base.metadata, "create_all", lambda **_: None)
+    monkeypatch.setattr(seed_module, "ensure_schema", lambda: "current")
     monkeypatch.setattr(seed_module, "DEMO_ITEMS", [])
     monkeypatch.setattr(seed_module, "DEMO_HISTORY", [])
     monkeypatch.setattr(
@@ -157,6 +171,15 @@ def test_demo_data_covers_the_uncategorised_case(db):
     assert (
         db.query(Disposition).filter(Disposition.item_category.is_(None)).count() >= 1
     )
+
+
+def test_seed_assigns_items_to_the_demo_user(db):
+    """The existing fridge is someone's kitchen, not a shared anonymous pile."""
+    from app.services.auth import DEMO_USER_ID
+
+    seed(reset=True, session=db)
+    owners = {item.user_id for item in db.query(InventoryItem).all()}
+    assert owners == {DEMO_USER_ID}
 
 
 def test_history_items_are_resolved_and_live_items_are_not(db):

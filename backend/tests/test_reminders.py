@@ -2,13 +2,17 @@
 
 from datetime import date, timedelta
 
+from app.core import clock
+
 import pytest
 
 from app.models.inventory import Expiration, InventoryItem
 
 
 def add_item(db, name: str, days_from_today: int | None, *, with_expiration=True):
-    item = InventoryItem(name=name, quantity=1.0, unit="count")
+    item = InventoryItem(
+        name=name, quantity=1.0, unit="count", user_id=db.info["user"].id
+    )
     db.add(item)
     db.flush()
     if with_expiration:
@@ -16,7 +20,7 @@ def add_item(db, name: str, days_from_today: int | None, *, with_expiration=True
             Expiration(
                 item_id=item.id,
                 expiration_date=(
-                    date.today() + timedelta(days=days_from_today)
+                    clock.today() + timedelta(days=days_from_today)
                     if days_from_today is not None
                     else None
                 ),
@@ -90,7 +94,7 @@ class TestPayload:
         assert entry["name"] == "Milk"
         assert entry["quantity"] == 1.0
         assert entry["source"] == "user"
-        assert entry["expiration_date"] == str(date.today() + timedelta(days=2))
+        assert entry["expiration_date"] == str(clock.today() + timedelta(days=2))
         assert entry["id"]
 
     def test_multiple_items_are_all_returned(self, client, db):

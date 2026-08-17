@@ -18,14 +18,17 @@ Usage, from the backend/ directory:
 from __future__ import annotations
 
 import argparse
-from datetime import date, timedelta
+from datetime import timedelta
+
+from app.core import clock
 from typing import NamedTuple
 
 from sqlalchemy.orm import Session
 
-from app.db.session import SessionLocal, engine
-from app.models.base import Base
+from app.db.schema import ensure_schema
+from app.db.session import SessionLocal
 from app.models.inventory import Disposition, Expiration, InventoryItem
+from app.services.auth import ensure_demo_user
 from app.services.disposition import apply_disposition
 
 
@@ -101,6 +104,8 @@ def _add_item(
     offset: int | None,
     source: str,
     category: str | None,
+    user_id: str,
+    today=None,
 ) -> InventoryItem:
     item = InventoryItem(
         name=name,
@@ -108,6 +113,7 @@ def _add_item(
         unit=unit,
         category=category,
         category_source="dataset" if category is not None else "unknown",
+        user_id=user_id,
     )
     session.add(item)
     session.flush()
@@ -115,7 +121,9 @@ def _add_item(
         Expiration(
             item_id=item.id,
             expiration_date=(
-                date.today() + timedelta(days=offset) if offset is not None else None
+                (today or clock.today()) + timedelta(days=offset)
+                if offset is not None
+                else None
             ),
             source=source,
             shelf_life_days=offset if offset and offset > 0 else None,
@@ -133,7 +141,11 @@ def seed(reset: bool = False, session: Session | None = None) -> None:
     """
     owns_session = session is None
     if owns_session:
-        Base.metadata.create_all(bind=engine)
+        # Migrations rather than create_all, so seeding a fresh database produces
+        # the same schema a deployment would get instead of a second, parallel
+        # definition of it that can drift. `ensure_schema` also adopts a
+        # pre-migration file instead of failing on the first CREATE TABLE.
+        ensure_schema()
         session = SessionLocal()
     try:
         if reset:
@@ -145,6 +157,9 @@ def seed(reset: bool = False, session: Session | None = None) -> None:
             session.commit()
             print(f"Removed {deleted} existing item(s).")
 
+        owner = ensure_demo_user(session)
+        today = clock.today(owner.timezone)
+
         for entry in DEMO_ITEMS:
             _add_item(
                 session,
@@ -154,6 +169,8 @@ def seed(reset: bool = False, session: Session | None = None) -> None:
                 entry.days,
                 entry.source,
                 entry.category,
+                owner.id,
+                today=today,
             )
 
         for outcome in DEMO_HISTORY:
@@ -165,6 +182,8 @@ def seed(reset: bool = False, session: Session | None = None) -> None:
                 outcome.days,
                 "user",
                 outcome.category,
+                owner.id,
+                today=today,
             )
             apply_disposition(
                 session, item, outcome=outcome.outcome, reason=outcome.reason

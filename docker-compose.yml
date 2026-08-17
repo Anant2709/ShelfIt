@@ -1,4 +1,22 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: shelfit
+      POSTGRES_PASSWORD: shelfit
+      POSTGRES_DB: shelfit
+    ports:
+      - "5432:5432"
+    volumes:
+      - shelfit_pg:/var/lib/postgresql/data
+    profiles:
+      - postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shelfit -d shelfit"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   api:
     build:
       context: ./backend
@@ -7,13 +25,17 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Container-local paths; the host bind mount below keeps data across runs.
-      DATABASE_URL: sqlite:////data/shelfit.db
+      # Default compose demo stays on SQLite. For local Postgres:
+      # DATABASE_URL=postgresql+psycopg://shelfit:shelfit@postgres:5432/shelfit
+      # and `docker compose --profile postgres up`.
+      # Interview primary is hosted Neon/Supabase via backend/.env — see docs/postgres.md.
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/shelfit.db}
       UPLOAD_DIR: /data/uploads
       SHELF_LIFE_PATH: /data/shelf_life.json
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       CLASSIFIER_BACKEND: ${CLASSIFIER_BACKEND:-vision_llm}
+      EXA_API_KEY: ${EXA_API_KEY:-}
     volumes:
       - ./data:/data
     healthcheck:
@@ -32,3 +54,6 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+volumes:
+  shelfit_pg:

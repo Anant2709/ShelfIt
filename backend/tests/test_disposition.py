@@ -6,6 +6,9 @@ fiction.
 """
 
 from datetime import date, datetime, timedelta
+
+from app.core import clock
+from app.core.clock import utcnow
 from types import SimpleNamespace
 
 import pytest
@@ -16,6 +19,7 @@ from app.services.disposition import (
     DispositionError,
     ExcessQuantityError,
     apply_disposition,
+    revert_disposition,
     summarise_waste,
     waste_report,
 )
@@ -25,7 +29,11 @@ def add_item(
     db, name="Milk", quantity=1.0, unit="l", days_from_today=5, category="dairy"
 ):
     item = InventoryItem(
-        name=name, quantity=quantity, unit=unit, category=category
+        name=name,
+        quantity=quantity,
+        unit=unit,
+        category=category,
+        user_id=db.info["user"].id,
     )
     db.add(item)
     db.flush()
@@ -33,7 +41,7 @@ def add_item(
         Expiration(
             item_id=item.id,
             expiration_date=(
-                date.today() + timedelta(days=days_from_today)
+                clock.today() + timedelta(days=days_from_today)
                 if days_from_today is not None
                 else None
             ),
@@ -140,10 +148,224 @@ class TestApplyDisposition:
 
     def test_backdated_event_computes_days_remaining_as_of_then(self, db):
         item = add_item(db, days_from_today=2)
-        then = datetime.now().replace(tzinfo=None) - timedelta(days=5)
+        # utcnow rather than datetime.now: stored timestamps are naive UTC, and a
+        # local one is a different date for part of every evening.
+        then = utcnow() - timedelta(days=5)
         recorded = apply_disposition(db, item, "wasted", occurred_at=then)
         # Expiry is two days from today, so five days ago it had seven days left.
         assert recorded.days_remaining == 7
+
+    def test_events_are_attributed_to_the_user_by_default(self, db):
+        """The assistant can also write here, so the default must be explicit."""
+        item = add_item(db)
+        assert apply_disposition(db, item, "consumed").source == "user"
+
+    def test_source_can_be_overridden(self, db):
+        item = add_item(db)
+        recorded = apply_disposition(db, item, "consumed", source="assistant")
+        assert recorded.source == "assistant"
+
+
+class TestRevertDisposition:
+    """Undo exists because the assistant can record outcomes itself.
+
+    A model's write can be plausible and still wrong, so anything it does has to
+    be reversible by the person it was done to.
+    """
+
+    def test_quantity_goes_back_on_the_shelf(self, db):
+        item = add_item(db, quantity=400, unit="g")
+        event = apply_disposition(db, item, "consumed", quantity=150)
+        db.commit()
+        revert_disposition(db, event)
+        db.commit()
+        db.refresh(item)
+        assert item.quantity == 400
+
+    def test_a_resolved_item_becomes_live_again(self, db):
+        item = add_item(db, quantity=1.0)
+        event = apply_disposition(db, item, "consumed")
+        db.commit()
+        assert item.resolved_at is not None
+
+        revert_disposition(db, event)
+        db.commit()
+        db.refresh(item)
+        assert item.resolved_at is None
+        assert item.quantity == 1.0
+
+    def test_the_event_is_removed_not_negated(self, db):
+        """A matched pair of opposite events would inflate the waste counts."""
+        item = add_item(db, quantity=1.0)
+        event = apply_disposition(db, item, "wasted")
+        db.commit()
+        revert_disposition(db, event)
+        db.commit()
+        assert db.query(Disposition).count() == 0
+
+    def test_reverting_one_of_several_leaves_the_others(self, db):
+        item = add_item(db, quantity=400, unit="g")
+        first = apply_disposition(db, item, "consumed", quantity=100)
+        apply_disposition(db, item, "wasted", quantity=100)
+        db.commit()
+
+        revert_disposition(db, first)
+        db.commit()
+        db.refresh(item)
+        assert item.quantity == 300
+        assert db.query(Disposition).count() == 1
+
+    def test_waste_analytics_forget_a_reverted_event(self, db):
+        item = add_item(db, quantity=1.0)
+        event = apply_disposition(db, item, "wasted")
+        db.commit()
+        revert_disposition(db, event)
+        db.commit()
+        assert waste_report(db, window_days=30).wasted.events == 0
+
+    def test_an_orphaned_event_cannot_be_reverted(self, db):
+        item = add_item(db, quantity=1.0)
+        event = apply_disposition(db, item, "consumed")
+        db.commit()
+        # Detach the event so its item cannot be found, as a deleted item would.
+        event.item_id = "gone"
+        db.add(event)
+        db.flush()
+        with pytest.raises(DispositionError):
+            revert_disposition(db, event)
+
+
+class TestUndoEndpoint:
+    def add(self, client, name="Milk", quantity=1.0, unit="l"):
+        return client.post(
+            "/api/inventory/",
+            json={"name": name, "quantity": quantity, "unit": unit},
+        ).json()
+
+    def test_undo_returns_the_restored_item(self, client):
+        created = self.add(client)
+        event = client.post(
+            f"/api/inventory/{created['id']}/dispositions",
+            json={"outcome": "consumed"},
+        ).json()["disposition"]
+
+        response = client.delete(
+            f"/api/inventory/{created['id']}/dispositions/{event['id']}"
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["quantity"] == 1.0
+        assert body["is_resolved"] is False
+
+    def test_undone_item_reappears_in_the_list(self, client):
+        created = self.add(client)
+        event = client.post(
+            f"/api/inventory/{created['id']}/dispositions",
+            json={"outcome": "wasted"},
+        ).json()["disposition"]
+        assert client.get("/api/inventory/").json() == []
+
+        client.delete(f"/api/inventory/{created['id']}/dispositions/{event['id']}")
+        names = [item["name"] for item in client.get("/api/inventory/").json()]
+        assert names == ["Milk"]
+
+    def test_undo_removes_it_from_the_waste_report(self, client):
+        created = self.add(client)
+        event = client.post(
+            f"/api/inventory/{created['id']}/dispositions",
+            json={"outcome": "wasted"},
+        ).json()["disposition"]
+        assert client.get("/api/analytics/waste").json()["wasted"]["events"] == 1
+
+        client.delete(f"/api/inventory/{created['id']}/dispositions/{event['id']}")
+        assert client.get("/api/analytics/waste").json()["wasted"]["events"] == 0
+
+    def test_unknown_disposition_is_a_404(self, client):
+        created = self.add(client)
+        response = client.delete(
+            f"/api/inventory/{created['id']}/dispositions/nope"
+        )
+        assert response.status_code == 404
+
+    def test_a_disposition_belonging_to_another_item_is_a_404(self, client):
+        """The id must match the item in the path, not just exist."""
+        first = self.add(client, name="Milk")
+        second = self.add(client, name="Bread", unit="count")
+        event = client.post(
+            f"/api/inventory/{first['id']}/dispositions",
+            json={"outcome": "consumed"},
+        ).json()["disposition"]
+
+        response = client.delete(
+            f"/api/inventory/{second['id']}/dispositions/{event['id']}"
+        )
+        assert response.status_code == 404
+        # And the real event survived the mismatched attempt.
+        assert (
+            len(client.get(f"/api/inventory/{first['id']}/dispositions").json()) == 1
+        )
+
+    def test_an_event_whose_item_has_gone_is_not_found(self, client, db):
+        """A missing item is 404, same as an id that was never yours.
+
+        Constructed directly: deleting an item cascades the events, so this
+        shape cannot arise through the API. The ownership check runs first, so
+        the handler must not leak that a disposition row still exists for an
+        item that does not.
+        """
+        from app.models.inventory import Disposition
+
+        created = self.add(client)
+        event = client.post(
+            f"/api/inventory/{created['id']}/dispositions",
+            json={"outcome": "consumed"},
+        ).json()["disposition"]
+
+        orphan = db.get(Disposition, event["id"])
+        orphan.item_id = "gone"
+        db.add(orphan)
+        db.commit()
+
+        response = client.delete(f"/api/inventory/gone/dispositions/{event['id']}")
+        assert response.status_code == 404
+
+    def test_a_revert_failure_is_a_conflict(self, client, db, monkeypatch):
+        """The handler still maps a service error, even if ownership passed."""
+        from app.services import disposition as disposition_service
+
+        created = self.add(client)
+        event = client.post(
+            f"/api/inventory/{created['id']}/dispositions",
+            json={"outcome": "consumed"},
+        ).json()["disposition"]
+
+        def _fail(*_args, **_kwargs):
+            raise disposition_service.DispositionError("cannot undo")
+
+        monkeypatch.setattr(
+            "app.api.endpoints.inventory.revert_disposition", _fail
+        )
+        response = client.delete(
+            f"/api/inventory/{created['id']}/dispositions/{event['id']}"
+        )
+        assert response.status_code == 409
+
+    def test_an_assistant_recorded_event_can_be_undone(self, client, db):
+        """The case this endpoint exists for."""
+        from app.models.inventory import InventoryItem
+        from app.services.disposition import apply_disposition
+
+        created = self.add(client, name="Paneer", quantity=200, unit="g")
+        item = db.get(InventoryItem, created["id"])
+        event = apply_disposition(db, item, "consumed", source="assistant")
+        db.commit()
+        event_id = event.id
+
+        response = client.delete(
+            f"/api/inventory/{created['id']}/dispositions/{event_id}"
+        )
+        assert response.status_code == 200
+        assert response.json()["quantity"] == 200
 
 
 class TestSummariseWaste:
@@ -322,6 +544,18 @@ class TestDispositionEndpoint:
         assert body["item"]["is_resolved"] is True
         assert body["item"]["quantity"] == 0
 
+    def test_an_event_recorded_through_the_api_is_attributed_to_the_user(
+        self, client
+    ):
+        created = client.post(
+            "/api/inventory/", json={"name": "Milk", "quantity": 1, "unit": "l"}
+        ).json()
+        response = client.post(
+            f"/api/inventory/{created['id']}/dispositions",
+            json={"outcome": "consumed"},
+        )
+        assert response.json()["disposition"]["source"] == "user"
+
     def test_partial_waste_keeps_the_item_on_the_list(self, client):
         created = client.post(
             "/api/inventory/",
@@ -445,7 +679,7 @@ class TestDispositionEndpoint:
         )
         response = client.post(
             f"/api/inventory/{created['id']}/expiration",
-            json={"expiration_date": str(date.today())},
+            json={"expiration_date": str(clock.today())},
         )
         assert response.status_code == 409
 
@@ -470,7 +704,7 @@ class TestRemindersIgnoreResolved:
             json={
                 "name": "Old Yogurt",
                 "quantity": 1,
-                "expiration_date": str(date.today() - timedelta(days=3)),
+                "expiration_date": str(clock.today() - timedelta(days=3)),
             },
         ).json()
         assert client.get("/api/inventory/reminders").json()["items"]
@@ -483,7 +717,9 @@ class TestRemindersIgnoreResolved:
         assert body["counts"]["expired"] == 0
 
     def test_resolved_undated_item_drops_out_of_needs_expiry_date(self, client, db):
-        item = InventoryItem(name="Salt", quantity=1.0, unit="kg")
+        item = InventoryItem(
+            name="Salt", quantity=1.0, unit="kg", user_id=db.info["user"].id
+        )
         db.add(item)
         db.flush()
         db.add(Expiration(item_id=item.id, expiration_date=None, source="unknown"))
@@ -514,7 +750,7 @@ class TestAnalyticsEndpoint:
                 "name": "Yogurt",
                 "quantity": 400,
                 "unit": "g",
-                "expiration_date": str(date.today() - timedelta(days=2)),
+                "expiration_date": str(clock.today() - timedelta(days=2)),
             },
         ).json()
         milk = client.post(

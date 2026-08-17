@@ -9,6 +9,8 @@ than illustrative.
 
 from datetime import date, timedelta
 
+from app.core import clock
+
 import pytest
 
 from app.models.inventory import Expiration, InventoryItem
@@ -35,6 +37,7 @@ def add_item(
         unit=unit,
         category=category,
         category_source="dataset" if category else "unknown",
+        user_id=db.info["user"].id,
     )
     db.add(item)
     db.flush()
@@ -43,7 +46,7 @@ def add_item(
             Expiration(
                 item_id=item.id,
                 expiration_date=(
-                    date.today() + timedelta(days=days_from_today)
+                    clock.today() + timedelta(days=days_from_today)
                     if days_from_today is not None
                     else None
                 ),
@@ -93,7 +96,7 @@ class TestBucketBoundsAgreeWithClassify:
 
     def test_bounds_default_to_today(self):
         low, high = bucket_bounds(Urgency.TODAY)
-        assert low == high == date.today()
+        assert low == high == clock.today()
 
 
 class TestSearch:

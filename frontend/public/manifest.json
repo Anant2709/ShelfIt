@@ -1,9 +1,21 @@
 {
   "name": "Shelf It",
   "short_name": "ShelfIt",
+  "description": "Track groceries, cook from your fridge, cut waste.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#0ea5e9",
-  "icons": []
+  "background_color": "#f7f1e8",
+  "theme_color": "#f4a574",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
 }

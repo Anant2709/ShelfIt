@@ -23,6 +23,8 @@ from app.services.category import (
 from app.services.category_store import LearnedCategoryStore
 from app.services.llm_categorizer import _parse, resolve_category
 
+from app.core import clock
+
 
 @pytest.fixture
 def store(db):
@@ -614,7 +616,7 @@ class TestCategoryOnItems:
             "/api/inventory/",
             json={
                 "name": "Paneer",
-                "expiration_date": str(date.today() + timedelta(days=2)),
+                "expiration_date": str(clock.today() + timedelta(days=2)),
             },
         )
         entry = client.get("/api/inventory/reminders").json()["items"][0]

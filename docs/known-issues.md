@@ -7,26 +7,39 @@ document explains the reasoning.
 
 ## Open
 
-### The two resolvers disagree about what counts as a grocery
+### Non-food items cannot be represented
 
-**Where:** `backend/app/services/llm_estimator.py` and
-`backend/app/services/llm_categorizer.py`
+**Where:** `backend/app/services/category.py`
 
-Observed live: adding "Dish Soap" produced no category — correctly refused, it is not
-food — while the shelf-life resolver gave it 365 days without hesitation. Both
-answers are individually defensible, since soap does have a shelf life, but the pair
-is incoherent: one resolver decided the item was out of domain and the other did not.
+Observed live: adding "Dish Soap" produced no category, while the shelf-life resolver
+gave it 365 days.
 
-The categoriser refuses more readily because it picks from a closed set and anything
-off it is discarded, whereas shelf life accepts any integer in a wide range. So the
-constraint that makes categories trustworthy is also what makes the two disagree.
+It is tempting to read that as the two resolvers disagreeing about what a grocery is.
+They do not. The categoriser holds nine options, all of them food types, and none
+applies to soap, so it returned nothing — that is the absence of an applicable
+answer, not a judgment about domain membership. And 365 days is correct; unopened
+soap does keep about a year. Neither resolver is wrong.
 
-Nothing is corrupted by this today — an uncategorised item is still listed, filtered,
-and reported. It matters because "is this even a grocery" is currently answered twice,
-independently, by two prompts that cannot see each other.
+The real gap is that the model has no way to say "a real item on the shelf that is
+not food", so such an item comes out looking half-resolved.
 
-**Fix direction:** decide domain membership once, before either resolver runs, and
-have both honour that answer.
+Nothing is corrupted by this. The item lists, matches the `unknown` category filter,
+and appears in the waste report as an uncategorised row.
+
+**Why it is still open.** Every fix considered so far is worse than the gap:
+
+- A domain gate before both resolvers costs a third call per item and would reject
+  legitimate entries. Tracking soap, foil, or bin bags in a kitchen app is a real use,
+  and its expiry is useful information.
+- A `household` or `non_food` member widens the closed set but makes it answer two
+  questions instead of one — the same mixing of axes that `frozen` was rejected for.
+- One prompt answering both category and shelf life removes the incoherence but
+  couples two things with different lifecycles: shelf life is promoted and corrected
+  by a review script and is skipped entirely when the user supplies a date, and a
+  single malformed reply would then spoil both answers rather than one.
+
+**Fix direction:** a second axis for what an item *is for* (food or household), kept
+separate from the food-type category rather than merged into it.
 
 ### Learned categories cannot be reviewed or promoted
 
@@ -60,32 +73,68 @@ repo, so offline coverage grows with use.
 
 Worth knowing because it is a visible behaviour difference if the key is missing.
 
-### No schema migrations
+### The assistant picks between same-named items instead of asking
 
-**Where:** `backend/app/main.py`
+**Where:** `backend/app/services/chatbot.py`, `backend/app/services/chat_tools.py`
 
-Schema is created by `Base.metadata.create_all()` at import time. That handles a
-fresh database but cannot evolve one, so any model change requires deleting
-`data/shelfit.db`. Blocks any deployment that must preserve data.
+Found by measurement, not by reading the code. The probe puts two items called "Paneer"
+on the shelf — 200 g expiring tomorrow, 500 g expiring in five days — asks "I used up the
+paneer" repeatedly, and undoes every action between trials so each run starts identically.
 
-This has now bitten twice in development. Adding `category_source` to
-`inventory_items` made every query fail with `no such column`, and the only recovery
-was moving the database aside and reseeding — losing whatever was in it. On a real
-deployment that would have been data loss rather than an inconvenience, which is the
-reason this is listed as blocking rather than untidy.
+The first version of the prompt opened with a blanket *"prefer items that are expiring
+soonest"*, meant as advice for recommendations. Measured, the model applied it to tool
+targets as well:
 
-**Fix direction:** Alembic, introduced alongside the move to Postgres.
+| Behaviour | Prompt as written | Urgency advice scoped | Plus deterministic guards |
+|---|---|---|---|
+| Recorded an unrelated item (bread) | 2/5 | still occurred | **0/12** |
+| Recorded *both* Paneers | — | 3/8 | **0/12** |
+| Recorded exactly one Paneer | 3/5 | 5/8 | 10/12 |
+| Asked which was meant | 0/5 | 5/8 | 2/12 |
 
-### Single-tenant by construction
+The worst row is the first. Asked about paneer, it recorded **Whole Wheat Bread** — the
+most urgent item in the fridge and the first one listed. Not a near miss; an unrelated
+item, because urgency was bleeding from "what should I suggest" into "what should I act
+on". Splitting the prompt into a suggesting section and a recording section, with the
+exclusion stated outright, made that rarer. It did not remove it, which is the general
+lesson: **an instruction in a prompt is a request, not a constraint.**
 
-There is no user model, so every request reads and writes one global inventory.
-Acceptable for a local single-user MVP, but it is an architectural assumption
-baked into every query rather than a feature flag.
+**What is enforced deterministically now.** Two guards, both in `chat_tools.py`, both
+narrow enough to have no plausible false positive:
 
-### Permissive CORS
+- *Only an item the user named.* If the message literally contains an item's name, the
+  tool refuses any other item. Matching is on the whole name, so "the whole packet" does
+  not name "Whole Wheat Bread". If the message names nothing recognisable — "I finished
+  it", after a previous turn — no constraint applies, because refusing pronouns would
+  break ordinary use.
+- *Not two items of the same name in one turn.* Recording both is never a correct reading
+  of one sentence. Two items with *different* names is fine ("I used the milk and the
+  bread"), and the same item twice is fine ("used half, binned the rest").
 
-`allow_origins=["*"]` together with `allow_credentials=True` in
-`backend/app/main.py`. Fine for local development, not shippable.
+**What is still not guaranteed.** Which of two same-named items was meant. That is
+genuinely unknowable at the tool layer: the tool receives an `item_id`, and by the time an
+id exists the ambiguity is already resolved — the id *is* the disambiguation. The guards
+bound the damage to one item that the user did name, and 2/12 of the time it asks
+properly, but it usually just picks.
+
+**Why that is tolerable for now.** Every action is shown to the user the moment it
+happens rather than discovered later, records `source="assistant"`, and carries an undo
+handle. The model cannot delete, so nothing is destroyed. `DELETE
+/api/inventory/{id}/dispositions/{event_id}` was built *because* of this finding:
+ambiguity could not be prevented, so it was made cheap to correct.
+
+**Fix direction:** two-phase tool calls — the model proposes, the user confirms, the write
+happens on confirmation. That is a change to the streaming protocol and the interface, so
+it waits for the redesign.
+
+### CORS is localhost-only
+
+Origins are an explicit list (`http://localhost:5173`, `http://127.0.0.1:5173`)
+because cookies cannot be sent to `*`. That is enough for local development.
+Shipping would also need `cookie_secure=True` behind HTTPS and the real frontend
+origin on the list. Google sign-in is implemented but off until
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set. There is still no
+password reset or email verification.
 
 ### Frontend has one shared status slot
 
@@ -94,6 +143,58 @@ baked into every query rather than a feature flag.
 nothing can be dismissed independently.
 
 ## Fixed
+
+### Single-tenant by construction
+
+**Fixed in:** the auth commit
+**Test:** `tests/test_auth.py::TestIsolation`
+
+Every request used to read one global fridge. Inventory, conversations, and the
+waste report are now scoped to the signed-in user. Another user's id is 404, not
+403, so guessing cannot map someone else's kitchen. Existing rows were assigned
+to the demo account (`juhi@local`) rather than deleted.
+
+What is still out of scope: password reset, email verification, OAuth, and roles.
+
+### No per-user timezone
+
+**Fixed in:** the auth commit
+**Test:** `tests/test_clock.py` (named zone) and
+`tests/test_auth.py::TestTimezoneOnRequests`
+
+`clock.today(tz_name)` uses the IANA zone on the user record. Reminders, list
+urgency, and chat all pass `user.timezone`. UTC remains the fallback when no
+user is in scope, so stored timestamps stay internally consistent.
+
+### Adding a column broke the existing database
+
+**Fixed in:** the Alembic commit
+**Test:** `tests/test_migrations.py::TestModelsAndMigrationsAgree::test_models_and_migrations_agree`
+
+Schema used to be created by `Base.metadata.create_all()` at import time. That
+creates missing *tables* and never looks inside one it decides already exists. Adding
+`category_source` to `inventory_items` made every query fail with `no such column`,
+and the only recovery was moving the database aside and reseeding. Adding the chat
+feature later created two new tables correctly and silently skipped
+`dispositions.source` — a partial failure that looked like success.
+
+The test suite could not catch this. Tests built their schema from the models on
+every run, so they only ever exercised the one case `create_all` handles. A test
+that proves a schema change *applies* has to start from the old schema, and nothing
+recorded what the old schema was.
+
+Migrations replace it. The baseline revision describes the schema as it stood when
+`create_all` was removed. A pre-migration database is stamped at that revision
+rather than upgraded, and only after the live tables are checked against the
+models; a mismatch is refused. `test_models_and_migrations_agree` builds a database
+from the migrations alone and diffs it against the models, so a model change
+without a migration fails in CI. Startup logs whether the database is current and
+does not repair it.
+
+SQLite cannot `ALTER TABLE` in most of the ways a later change needs, so batch mode
+is on: those operations become create-copy-swap. That is what makes the auth
+migration — a `user_id` on every existing table — possible without deleting the
+database.
 
 ### Two spellings of one item could disagree
 

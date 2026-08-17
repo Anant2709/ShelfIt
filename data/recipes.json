@@ -1,0 +1,595 @@
+[
+  {
+    "id": "tomato-rice",
+    "title": "Tomato rice",
+    "slots": [
+      "lunch",
+      "dinner"
+    ],
+    "patterns": [
+      "omnivore",
+      "vegetarian",
+      "eggetarian",
+      "vegan"
+    ],
+    "allergens": [],
+    "ingredients": [
+      {
+        "name": "Tomatoes",
+        "aliases": [
+          "Tomato",
+          "Tomatoes"
+        ],
+        "amount": "2 medium"
+      },
+      {
+        "name": "Rice",
+        "aliases": [
+          "Basmati Rice",
+          "Rice"
+        ],
+        "amount": "1 cup"
+      },
+      {
+        "name": "Oil",
+        "aliases": [
+          "Olive Oil",
+          "Oil"
+        ],
+        "amount": "1 tbsp"
+      },
+      {
+        "name": "Salt",
+        "aliases": [
+          "Salt"
+        ],
+        "amount": "to taste"
+      }
+    ],
+    "kcal": 450,
+    "servings": 2,
+    "prep_min": 10,
+    "cook_min": 20,
+    "steps": [
+      "Rinse the rice until the water runs clearer.",
+      "Saute chopped tomatoes in oil with salt until soft.",
+      "Add rice and water, simmer covered until tender.",
+      "Fluff and serve hot."
+    ],
+    "protein_g": 12,
+    "carbs_g": 45,
+    "fat_g": 10
+  },
+  {
+    "id": "salted-rice",
+    "title": "Salted rice",
+    "slots": [
+      "breakfast",
+      "lunch",
+      "snack",
+      "dinner"
+    ],
+    "patterns": [
+      "omnivore",
+      "vegetarian",
+      "eggetarian",
+      "vegan"
+    ],
+    "allergens": [],
+    "ingredients": [
+      {
+        "name": "Rice",
+        "aliases": [
+          "Basmati Rice",
+          "Rice"
+        ],
+        "amount": "1 cup"
+      },
+      {
+        "name": "Oil",
+        "aliases": [
+          "Olive Oil",
+          "Oil"
+        ],
+        "amount": "1 tbsp"
+      },
+      {
+        "name": "Salt",
+        "aliases": [
+          "Salt"
+        ],
+        "amount": "to taste"
+      }
+    ],
+    "kcal": 400,
+    "servings": 2,
+    "prep_min": 10,
+    "cook_min": 20,
+    "steps": [
+      "Rinse the rice.",
+      "Cook rice in salted water until tender.",
+      "Drain if needed, drizzle oil, and fluff."
+    ],
+    "protein_g": 12,
+    "carbs_g": 45,
+    "fat_g": 10
+  },
+  {
+    "id": "spinach-tomato-rice",
+    "title": "Spinach tomato rice",
+    "slots": [
+      "lunch",
+      "dinner"
+    ],
+    "patterns": [
+      "omnivore",
+      "vegetarian",
+      "eggetarian",
+      "vegan"
+    ],
+    "allergens": [],
+    "ingredients": [
+      {
+        "name": "Spinach",
+        "aliases": [
+          "Baby Spinach",
+          "Spinach",
+          "Fresh Spinach"
+        ],
+        "amount": "2 cups"
+      },
+      {
+        "name": "Tomatoes",
+        "aliases": [
+          "Tomato",
+          "Tomatoes"
+        ],
+        "amount": "2 medium"
+      },
+      {
+        "name": "Rice",
+        "aliases": [
+          "Basmati Rice",
+          "Rice"
+        ],
+        "amount": "1 cup"
+      }
+    ],
+    "kcal": 420,
+    "servings": 2,
+    "prep_min": 10,
+    "cook_min": 20,
+    "steps": [
+      "Wash spinach and chop tomatoes.",
+      "Saute tomatoes in oil, add spinach until wilted.",
+      "Stir in cooked rice and salt; warm through."
+    ],
+    "protein_g": 12,
+    "carbs_g": 45,
+    "fat_g": 10
+  },
+  {
+    "id": "paneer-tomato",
+    "title": "Paneer and tomato",
+    "slots": [
+      "lunch",
+      "dinner"
+    ],
+    "patterns": [
+      "omnivore",
+      "vegetarian"
+    ],
+    "allergens": [
+      "dairy"
+    ],
+    "ingredients": [
+      {
+        "name": "Paneer",
+        "aliases": [
+          "Paneer"
+        ],
+        "amount": "150 g"
+      },
+      {
+        "name": "Tomatoes",
+        "aliases": [
+          "Tomato",
+          "Tomatoes"
+        ],
+        "amount": "2 medium"
+      },
+      {
+        "name": "Oil",
+        "aliases": [
+          "Olive Oil",
+          "Oil"
+        ],
+        "amount": "1 tbsp"
+      }
+    ],
+    "kcal": 480,
+    "servings": 2,
+    "prep_min": 10,
+    "cook_min": 20,
+    "steps": [
+      "Cube paneer and chop tomatoes.",
+      "Saute tomatoes in oil with salt until saucy.",
+      "Add paneer and simmer a few minutes.",
+      "Serve warm."
+    ],
+    "protein_g": 12,
+    "carbs_g": 45,
+    "fat_g": 10
+  },
+  {
+    "id": "yogurt-bowl",
+    "title": "Yogurt bowl",
+    "slots": [
+      "breakfast",
+      "snack"
+    ],
+    "patterns": [
+      "omnivore",
+      "vegetarian"
+    ],
+    "allergens": [
+      "dairy"
+    ],
+    "ingredients": [
+      {
+        "name": "Yogurt",
+        "aliases": [
+          "Amul Yogurt",
+          "Greek Yogurt",
+          "Yogurt"
+        ],
+        "amount": "1 cup"
+      }
+    ],
+    "kcal": 250,
+    "servings": 2,
+    "prep_min": 10,
+    "cook_min": 20,
+    "steps": [
+      "Spoon yogurt into a bowl.",
+      "Top with fruit or a pinch of salt if savory.",
+      "Eat chilled."
+    ],
+    "protein_g": 12,
+    "carbs_g": 45,
+    "fat_g": 10
+  },
+  {
+    "id": "grilled-cheese",
+    "title": "Grilled cheese",
+    "slots": [
+      "lunch",
+      "snack"
+    ],
+    "patterns": [
+      "omnivore",
+      "vegetarian"
+    ],
+    "allergens": [
+      "dairy",
+      "gluten"
+    ],
+    "ingredients": [
+      {
+        "name": "Bread",
+        "aliases": [
+          "Whole Wheat Bread",
+          "Bread"
+        ],
+        "amount": "2 slices"
+      },
+      {
+        "name": "Cheese",
+        "aliases": [
+          "Cheddar Cheese",
+          "Cheese"
+        ],
+        "amount": "2 slices"
+      }
+    ],
+    "kcal": 420,
+    "servings": 2,
+    "prep_min": 10,
+    "cook_min": 20,
+    "steps": [
+      "Butter bread lightly and add cheese.",
+      "Grill in a pan until golden and melted.",
+      "Slice and serve."
+    ],
+    "protein_g": 12,
+    "carbs_g": 45,
+    "fat_g": 10
+  },
+  {
+    "id": "toast",
+    "title": "Toast",
+    "slots": [
+      "breakfast",
+      "snack"
+    ],
+    "patterns": [
+      "omnivore",
+      "vegetarian",
+      "eggetarian",
+      "vegan"
+    ],
+    "allergens": [
+      "gluten"
+    ],
+    "ingredients": [
+      {
+        "name": "Bread",
+        "aliases": [
+          "Whole Wheat Bread",
+          "Bread"
+        ],
+        "amount": "2 slices"
+      }
+    ],
+    "kcal": 180,
+    "servings": 2,
+    "prep_min": 10,
+    "cook_min": 20,
+    "steps": [
+      "Toast the bread until golden.",
+      "Add butter or topping of choice."
+    ],
+    "protein_g": 12,
+    "carbs_g": 45,
+    "fat_g": 10
+  },
+  {
+    "id": "veg-omelette",
+    "title": "Vegetable omelette",
+    "slots": [
+      "breakfast"
+    ],
+    "patterns": [
+      "omnivore",
+      "eggetarian"
+    ],
+    "allergens": [
+      "eggs"
+    ],
+    "ingredients": [
+      {
+        "name": "Eggs",
+        "aliases": [
+          "Eggs",
+          "Egg"
+        ],
+        "amount": "2"
+      },
+      {
+        "name": "Tomatoes",
+        "aliases": [
+          "Tomato",
+          "Tomatoes"
+        ],
+        "amount": "2 medium"
+      },
+      {
+        "name": "Spinach",
+        "aliases": [
+          "Baby Spinach",
+          "Spinach"
+        ],
+        "amount": "2 cups"
+      }
+    ],
+    "kcal": 320,
+    "servings": 2,
+    "prep_min": 10,
+    "cook_min": 20,
+    "steps": [
+      "Beat eggs with salt.",
+      "Pour into a hot oiled pan; add chopped veg.",
+      "Fold when set and serve."
+    ],
+    "protein_g": 12,
+    "carbs_g": 45,
+    "fat_g": 10
+  },
+  {
+    "id": "egg-fried-rice",
+    "title": "Egg fried rice",
+    "slots": [
+      "lunch",
+      "dinner"
+    ],
+    "patterns": [
+      "omnivore",
+      "eggetarian"
+    ],
+    "allergens": [
+      "eggs"
+    ],
+    "ingredients": [
+      {
+        "name": "Eggs",
+        "aliases": [
+          "Eggs",
+          "Egg"
+        ],
+        "amount": "2"
+      },
+      {
+        "name": "Rice",
+        "aliases": [
+          "Basmati Rice",
+          "Rice"
+        ],
+        "amount": "1 cup"
+      },
+      {
+        "name": "Oil",
+        "aliases": [
+          "Olive Oil",
+          "Oil"
+        ],
+        "amount": "1 tbsp"
+      }
+    ],
+    "kcal": 520,
+    "servings": 2,
+    "prep_min": 10,
+    "cook_min": 20,
+    "steps": [
+      "Scramble eggs in a hot oiled pan.",
+      "Add cooked rice and salt; toss until hot.",
+      "Serve immediately."
+    ],
+    "protein_g": 12,
+    "carbs_g": 45,
+    "fat_g": 10
+  },
+  {
+    "id": "cheese-omelette",
+    "title": "Cheese omelette",
+    "slots": [
+      "breakfast"
+    ],
+    "patterns": [
+      "omnivore",
+      "eggetarian"
+    ],
+    "allergens": [
+      "eggs",
+      "dairy"
+    ],
+    "ingredients": [
+      {
+        "name": "Eggs",
+        "aliases": [
+          "Eggs",
+          "Egg"
+        ],
+        "amount": "2"
+      },
+      {
+        "name": "Cheese",
+        "aliases": [
+          "Cheddar Cheese",
+          "Cheese"
+        ],
+        "amount": "2 slices"
+      }
+    ],
+    "kcal": 380,
+    "servings": 2,
+    "prep_min": 10,
+    "cook_min": 20,
+    "steps": [
+      "Beat eggs with salt.",
+      "Cook in a pan, add cheese, fold when melted."
+    ],
+    "protein_g": 12,
+    "carbs_g": 45,
+    "fat_g": 10
+  },
+  {
+    "id": "chicken-rice",
+    "title": "Chicken and rice",
+    "slots": [
+      "lunch",
+      "dinner"
+    ],
+    "patterns": [
+      "omnivore"
+    ],
+    "allergens": [],
+    "ingredients": [
+      {
+        "name": "Chicken",
+        "aliases": [
+          "Chicken Breast",
+          "Chicken"
+        ],
+        "amount": "150 g"
+      },
+      {
+        "name": "Rice",
+        "aliases": [
+          "Basmati Rice",
+          "Rice"
+        ],
+        "amount": "1 cup"
+      },
+      {
+        "name": "Tomatoes",
+        "aliases": [
+          "Tomato",
+          "Tomatoes"
+        ],
+        "amount": "2 medium"
+      }
+    ],
+    "kcal": 550,
+    "servings": 2,
+    "prep_min": 10,
+    "cook_min": 20,
+    "steps": [
+      "Cook chicken pieces until done.",
+      "Combine with cooked rice, oil, and salt.",
+      "Warm through and serve."
+    ],
+    "protein_g": 12,
+    "carbs_g": 45,
+    "fat_g": 10
+  },
+  {
+    "id": "chicken-tomato",
+    "title": "Chicken with tomatoes",
+    "slots": [
+      "lunch",
+      "dinner"
+    ],
+    "patterns": [
+      "omnivore"
+    ],
+    "allergens": [],
+    "ingredients": [
+      {
+        "name": "Chicken",
+        "aliases": [
+          "Chicken Breast",
+          "Chicken"
+        ],
+        "amount": "150 g"
+      },
+      {
+        "name": "Tomatoes",
+        "aliases": [
+          "Tomato",
+          "Tomatoes"
+        ],
+        "amount": "2 medium"
+      },
+      {
+        "name": "Oil",
+        "aliases": [
+          "Olive Oil",
+          "Oil"
+        ],
+        "amount": "1 tbsp"
+      }
+    ],
+    "kcal": 480,
+    "servings": 2,
+    "prep_min": 10,
+    "cook_min": 20,
+    "steps": [
+      "Cook chicken until browned.",
+      "Add chopped tomatoes and salt; simmer until saucy.",
+      "Serve hot."
+    ],
+    "protein_g": 12,
+    "carbs_g": 45,
+    "fat_g": 10
+  }
+]

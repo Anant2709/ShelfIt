@@ -63,6 +63,7 @@ def apply_disposition(
     quantity: float | None = None,
     reason: str | None = None,
     occurred_at: datetime | None = None,
+    source: str = "user",
 ) -> Disposition:
     """Record one consume or waste event and update remaining quantity.
 
@@ -92,6 +93,7 @@ def apply_disposition(
         quantity=amount,
         unit=item.unit,
         reason=reason,
+        source=source,
         occurred_at=when,
         item_name=item.name,
         item_category=item.category,
@@ -109,6 +111,34 @@ def apply_disposition(
     db.add(item)
     db.flush()
     return event
+
+
+def revert_disposition(db: Session, event: Disposition) -> InventoryItem:
+    """Undo one recorded outcome, putting the quantity back on the shelf.
+
+    This exists because the assistant can record outcomes through a tool call. A
+    write made on a model's reading of a sentence can be entirely plausible and
+    still wrong -- it can pick the wrong one of two items with the same name -- so
+    every such write has to be reversible by the person it was made for.
+
+    The event row is removed rather than negated. A correction is not an outcome,
+    and leaving a matched pair of opposite events in the log would inflate the
+    waste and consumption counts with things that never happened.
+    """
+    item = db.get(InventoryItem, event.item_id)
+    if item is None:
+        raise DispositionError("The item this event belongs to no longer exists")
+
+    item.quantity = (item.quantity or 0.0) + event.quantity
+    # Putting anything back means the item is on the shelf again, whatever it was
+    # before. Note the restored quantity can differ from the original by less than
+    # REMAINING_FLOOR, where a sub-floor remainder was absorbed on the way down.
+    item.resolved_at = None
+
+    db.delete(event)
+    db.add(item)
+    db.flush()
+    return item
 
 
 @dataclass(frozen=True)
@@ -246,12 +276,14 @@ def summarise_waste(
     )
 
 
-def waste_report(db: Session, window_days: int = 30) -> WasteReport:
+def waste_report(
+    db: Session, window_days: int = 30, user_id: str | None = None
+) -> WasteReport:
     """Events in the trailing window, inclusive of now."""
     cutoff = utcnow() - timedelta(days=window_days)
-    events = (
-        db.query(Disposition)
-        .filter(Disposition.occurred_at >= cutoff)
-        .all()
-    )
-    return summarise_waste(events, window_days)
+    query = db.query(Disposition).filter(Disposition.occurred_at >= cutoff)
+    if user_id is not None:
+        query = query.join(
+            InventoryItem, Disposition.item_id == InventoryItem.id
+        ).filter(InventoryItem.user_id == user_id)
+    return summarise_waste(query.all(), window_days)

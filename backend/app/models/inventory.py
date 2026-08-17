@@ -12,6 +12,12 @@ class InventoryItem(Base):
     __tablename__ = "inventory_items"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("users.id", name="fk_inventory_items_user_id"),
+        nullable=False,
+        index=True,
+    )
     name: Mapped[str] = mapped_column(String, nullable=False)
     # NULL means no category could be established. `category_source` still says
     # what was tried, so "asked and could not tell" is distinguishable from
@@ -22,6 +28,14 @@ class InventoryItem(Base):
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     quantity: Mapped[float] = mapped_column(Float, default=1.0)
     unit: Mapped[str] = mapped_column(String, default="count")
+    brand: Mapped[str | None] = mapped_column(String, nullable=True)
+    product_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    calories_kcal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    protein_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    carbs_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fat_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # open_food_facts, exa, or none. Never treated as a lab fact.
+    nutrition_source: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     # Set when remaining quantity hits zero after consume/waste. Distinct from
     # DELETE, which erases the row: a resolved item is history, not a mistake.
@@ -77,6 +91,10 @@ class Disposition(Base):
     quantity: Mapped[float] = mapped_column(Float, nullable=False)
     unit: Mapped[str] = mapped_column(String, nullable=False)
     reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Who recorded this: "user" or "assistant". The assistant can write to the
+    # inventory through tool calls, and an action it took on its own reading of a
+    # sentence should not be indistinguishable from one a person performed.
+    source: Mapped[str] = mapped_column(String, nullable=False, default="user")
     occurred_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     # Snapshots so later edits to the item cannot rewrite history.
     item_name: Mapped[str] = mapped_column(String, nullable=False)

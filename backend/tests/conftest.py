@@ -22,6 +22,7 @@ os.environ["MODEL_PATH"] = str(_TMP_ROOT / "model-that-does-not-exist.pt")
 # explicitly install a dataset cannot silently depend on the repo's real one.
 os.environ["SHELF_LIFE_PATH"] = str(_TMP_ROOT / "no-shelf-life.json")
 os.environ["CATEGORIES_PATH"] = str(_TMP_ROOT / "no-categories.json")
+os.environ["RECIPES_PATH"] = str(_TMP_ROOT / "no-recipes.json")
 # Unset by default so no code path can reach OpenAI unless a test opts in.
 os.environ["OPENAI_API_KEY"] = ""
 
@@ -31,8 +32,22 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 from app.db.deps import get_db  # noqa: E402
+from app.db.schema import upgrade_to_head  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.base import Base  # noqa: E402
+from app.services.auth import COOKIE_NAME, create_session, create_user  # noqa: E402
+
+# The learned-value stores and the SQL cache deliberately open their own sessions
+# against the configured engine rather than the request's, because a value learned
+# while handling a request has to outlive that request's transaction. They therefore
+# need a real schema on the throwaway database above.
+#
+# Until migrations existed, that schema arrived as a side effect of importing
+# app.main, which called create_all. Relying on production code to set up the test
+# environment is how removing that call broke forty tests that had nothing to do
+# with it. Building it here, from the migrations, states the dependency and
+# exercises the same path a deployment takes.
+upgrade_to_head()
 
 # StaticPool keeps a single connection alive, which is what makes an in-memory
 # SQLite database visible to both the test body and the request handlers.
@@ -46,9 +61,19 @@ TestSession = sessionmaker(bind=test_engine, autocommit=False, autoflush=False)
 
 @pytest.fixture
 def db():
-    """A clean schema per test."""
+    """A clean schema per test.
+
+    Built from the models rather than by running migrations, because this happens
+    once per test and migrations are far slower than create_all. That shortcut is
+    only safe because test_migrations.py asserts the two produce the same schema; if
+    they ever diverge, that test fails rather than this fixture quietly lying.
+    """
     Base.metadata.create_all(bind=test_engine)
     session = TestSession()
+    account = create_user(
+        session, email="test@local", password="testpass1", timezone="UTC"
+    )
+    session.info["user"] = account
     try:
         yield session
     finally:
@@ -57,8 +82,33 @@ def db():
 
 
 @pytest.fixture
-def client(db):
-    """TestClient whose handlers share the test's database session."""
+def user(db):
+    """The account most tests act as.
+
+    Created with the schema so helpers that build items by hand can attach them
+    without every test threading a user argument through.
+    """
+    return db.info["user"]
+
+
+@pytest.fixture
+def client(db, user):
+    """TestClient signed in as `user`, sharing the test's database session."""
+
+    def override_get_db():
+        yield db
+
+    token = create_session(db, user)
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as test_client:
+        test_client.cookies.set(COOKIE_NAME, token)
+        yield test_client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def anonymous_client(db):
+    """A client with no session cookie, for proving endpoints reject strangers."""
 
     def override_get_db():
         yield db
@@ -81,6 +131,7 @@ def isolated_cache(monkeypatch):
     from app.services import category as category_module
     from app.services import category_store as category_store_module
     from app.services import learned_store as learned_store_module
+    from app.services import recipes as recipes_module
     from app.services import shelf_life as shelf_life_module
 
     def _reset():
@@ -89,6 +140,7 @@ def isolated_cache(monkeypatch):
         learned_store_module.reset_learned_store()
         category_module.reset_category_dataset_cache()
         category_store_module.reset_category_store()
+        recipes_module.reset_recipe_cache()
 
     _reset()
     monkeypatch.setattr(cache_module.settings, "cache_backend", "none")
@@ -140,3 +192,70 @@ def sample_image_bytes():
         b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00"
         b"\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
     )
+
+
+SAMPLE_RECIPES = [
+    {
+        "id": "tomato-rice",
+        "title": "Tomato rice",
+        "slots": ["lunch", "dinner", "breakfast", "snack"],
+        "patterns": ["omnivore", "vegetarian", "eggetarian", "vegan"],
+        "allergens": [],
+        "ingredients": [
+            {"name": "Tomatoes", "aliases": ["Tomato", "Tomatoes"]},
+            {"name": "Rice", "aliases": ["Basmati Rice", "Rice"]},
+        ],
+        "kcal": 450,
+    },
+    {
+        "id": "chicken-rice",
+        "title": "Chicken and rice",
+        "slots": ["lunch", "dinner"],
+        "patterns": ["omnivore"],
+        "allergens": [],
+        "ingredients": [
+            {"name": "Chicken", "aliases": ["Chicken Breast", "Chicken"]},
+            {"name": "Rice", "aliases": ["Basmati Rice", "Rice"]},
+        ],
+        "kcal": 520,
+    },
+    {
+        "id": "paneer-tomato",
+        "title": "Paneer and tomato",
+        "slots": ["lunch", "dinner"],
+        "patterns": ["omnivore", "vegetarian"],
+        "allergens": ["dairy"],
+        "ingredients": [
+            {"name": "Paneer", "aliases": ["Paneer"]},
+            {"name": "Tomatoes", "aliases": ["Tomato", "Tomatoes"]},
+        ],
+        "kcal": 480,
+    },
+    {
+        "id": "veg-omelette",
+        "title": "Vegetable omelette",
+        "slots": ["breakfast"],
+        "patterns": ["omnivore", "eggetarian"],
+        "allergens": ["eggs"],
+        "ingredients": [
+            {"name": "Eggs", "aliases": ["Eggs", "Egg"]},
+            {"name": "Tomatoes", "aliases": ["Tomato", "Tomatoes"]},
+        ],
+        "kcal": 350,
+    },
+]
+
+
+@pytest.fixture
+def recipes(tmp_path, monkeypatch):
+    """Install a small curated set so diet tests do not read the repo file."""
+    import json
+
+    from app.core import config
+    from app.services import recipes as recipes_module
+
+    path = tmp_path / "recipes.json"
+    path.write_text(json.dumps(SAMPLE_RECIPES), encoding="utf-8")
+    monkeypatch.setattr(config.settings, "recipes_path", str(path))
+    recipes_module.reset_recipe_cache()
+    return path

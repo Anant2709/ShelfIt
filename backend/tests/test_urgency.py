@@ -7,6 +7,8 @@ fail based on when it ran.
 
 from datetime import date, timedelta
 
+from app.core import clock
+
 import pytest
 
 from app.services.urgency import (
@@ -37,7 +39,7 @@ class TestDaysUntil:
         assert days_until(None, today=TODAY) is None
 
     def test_defaults_to_the_real_today(self):
-        assert days_until(date.today()) == 0
+        assert days_until(clock.today()) == 0
 
 
 class TestClassify:

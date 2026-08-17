@@ -49,6 +49,14 @@ class InventoryItemOut(InventoryItemBase):
     category_source: str | None = None
     image_uri: str | None = None
     confidence: float | None = None
+    brand: str | None = None
+    product_name: str | None = None
+    calories_kcal: int | None = None
+    protein_g: float | None = None
+    carbs_g: float | None = None
+    fat_g: float | None = None
+    # open_food_facts, exa, or none.
+    nutrition_source: str | None = None
     created_at: datetime
     resolved_at: datetime | None = None
     expiration: ExpirationOut | None = None
@@ -186,6 +194,9 @@ class DispositionOut(BaseModel):
     quantity: float
     unit: str
     reason: str | None = None
+    # "user" or "assistant". The chat assistant can record events through a tool
+    # call, and a client should be able to show who did what.
+    source: str = "user"
     occurred_at: datetime
     item_name: str
     item_category: str | None = None

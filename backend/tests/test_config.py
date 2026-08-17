@@ -16,6 +16,7 @@ def test_default_paths_are_absolute():
     assert Path(settings.upload_dir).is_absolute()
     assert Path(settings.shelf_life_path).is_absolute()
     assert Path(settings.categories_path).is_absolute()
+    assert Path(settings.recipes_path).is_absolute()
     assert Path(settings.model_path).is_absolute()
 
 
