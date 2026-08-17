@@ -5,7 +5,7 @@ export default function DietMealRow({ meal, busy, isToday, onEaten, onSkipped })
   const [substitute, setSubstitute] = useState("");
   const [skipKcal, setSkipKcal] = useState("");
   const [skipOpen, setSkipOpen] = useState(false);
-  const [recipeOpen, setRecipeOpen] = useState(false);
+  const [recipeOpen, setRecipeOpen] = useState(true);
   const recipe = meal.recipe;
 
   return (
@@ -18,11 +18,11 @@ export default function DietMealRow({ meal, busy, isToday, onEaten, onSkipped })
         Use: {meal.uses.length ? meal.uses.join(", ") : "nothing on the shelf"}
         {meal.missing.length ? ` · Need: ${meal.missing.join(", ")}` : ""}
       </p>
-      {recipe && (
+      {recipe ? (
         <div className="diet-recipe">
           <button
             type="button"
-            className="link-button"
+            className="ghost-button diet-recipe-toggle"
             onClick={() => setRecipeOpen((open) => !open)}
           >
             {recipeOpen ? "Hide recipe" : "Show recipe"}
@@ -63,6 +63,8 @@ export default function DietMealRow({ meal, busy, isToday, onEaten, onSkipped })
             </div>
           )}
         </div>
+      ) : (
+        <p className="hint">No recipe details for this meal yet — regenerate the week.</p>
       )}
       {meal.log ? (
         <p className="hint">

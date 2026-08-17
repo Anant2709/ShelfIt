@@ -126,6 +126,39 @@ def load_recipe_card(raw: str | None) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
+def recipe_card_for_meal(meal: DietPlanMeal) -> dict | None:
+    """Full recipe card for API/UI, including older plans that lack recipe_json."""
+    stored = load_recipe_card(meal.recipe_json)
+    if stored is not None:
+        return stored
+
+    curated = recipe_by_id(meal.recipe_id)
+    if curated is not None:
+        return recipe_card_from_recipe(
+            curated, slot=meal.slot, title=meal.title, kcal=meal.kcal
+        )
+
+    names = _load_names(meal.ingredients_json)
+    if not names and not meal.title:
+        return None
+    return recipe_card_from_recipe(
+        {
+            "ingredients": [{"name": name, "amount": "as needed"} for name in names],
+            "steps": [
+                "Prep the ingredients listed above.",
+                f"Cook {meal.title}.",
+                "Season to taste and serve.",
+            ],
+            "servings": 2,
+            "prep_min": 10,
+            "cook_min": 20,
+        },
+        slot=meal.slot,
+        title=meal.title,
+        kcal=meal.kcal,
+    )
+
+
 def _load_recipe_card(raw: str | None) -> dict | None:
     return load_recipe_card(raw)
 

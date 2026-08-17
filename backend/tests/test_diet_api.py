@@ -244,6 +244,21 @@ class TestProgressAndSubstitutes:
         assert sample["recipe"]["ingredients"]
         assert "amount" in sample["recipe"]["ingredients"][0]
 
+    def test_plan_meals_without_recipe_json_still_return_a_card(self, client, recipes, db):
+        from app.models.diet import DietPlanMeal
+
+        save_profile(client, meals_per_day=2)
+        created = client.post("/api/diet/plan")
+        assert created.status_code == 200
+        meal_id = created.json()["meals"][0]["id"]
+        row = db.get(DietPlanMeal, meal_id)
+        row.recipe_json = None
+        db.commit()
+        refreshed = client.get("/api/diet/plan").json()["meals"][0]
+        assert refreshed["recipe"] is not None
+        assert refreshed["recipe"]["steps"]
+        assert refreshed["recipe"]["ingredients"]
+
     def test_skip_substitute_feeds_progress(self, client, recipes):
         save_profile(client, meals_per_day=2)
         client.post("/api/diet/plan")

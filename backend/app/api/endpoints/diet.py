@@ -37,12 +37,12 @@ from app.services.diet import (
     get_log,
     get_profile,
     list_extra_intakes,
-    load_recipe_card,
     meal_date,
     open_inventory,
     parse_allergens,
     parse_preferences,
     progress,
+    recipe_card_for_meal,
     resolved_calories,
     sorted_meals,
     tdee_kcal,
@@ -90,7 +90,7 @@ def _log_out(row) -> DietLogOut | None:
 
 def _meal_out(plan, meal, items, today, log=None) -> DietMealOut:
     uses, missing = decorate_meal(plan, meal, items, today)
-    card = load_recipe_card(meal.recipe_json)
+    card = recipe_card_for_meal(meal)
     recipe = DietRecipeOut(**card) if card else None
     return DietMealOut(
         id=meal.id,
