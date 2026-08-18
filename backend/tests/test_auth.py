@@ -211,6 +211,15 @@ class TestRegisterAndLogin:
         assert response.status_code == 200
         assert response.json()["id"] == user.id
 
+    def test_demo_login_is_refused_when_disabled(self, db, anonymous_client, monkeypatch):
+        from app.core import config
+
+        ensure_demo_user(db)
+        monkeypatch.setattr(config.settings, "enable_demo_login", False)
+        response = login(anonymous_client, "juhi", "shelfit")
+        assert response.status_code == 401
+        assert anonymous_client.get("/api/auth/me").status_code == 401
+
     def test_login_accepts_the_right_password(self, anonymous_client, user):
         response = login(anonymous_client, "test@local", "testpass1")
         assert response.status_code == 200
@@ -389,14 +398,23 @@ class TestAuthProviders:
         monkeypatch.setattr(config.settings, "google_client_id", None)
         monkeypatch.setattr(config.settings, "google_client_secret", None)
         body = anonymous_client.get("/api/auth/providers").json()
-        assert body == {"google": False}
+        assert body["google"] is False
+        assert body["demo"] is True
 
     def test_google_is_advertised_when_configured(self, anonymous_client, monkeypatch):
         from app.core import config
 
         monkeypatch.setattr(config.settings, "google_client_id", "id.apps.googleusercontent.com")
         monkeypatch.setattr(config.settings, "google_client_secret", "secret")
-        assert anonymous_client.get("/api/auth/providers").json()["google"] is True
+        body = anonymous_client.get("/api/auth/providers").json()
+        assert body["google"] is True
+        assert body["demo"] is True
+
+    def test_demo_is_hidden_when_disabled(self, anonymous_client, monkeypatch):
+        from app.core import config
+
+        monkeypatch.setattr(config.settings, "enable_demo_login", False)
+        assert anonymous_client.get("/api/auth/providers").json()["demo"] is False
 
 
 class TestGoogleSignIn:

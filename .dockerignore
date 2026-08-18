@@ -1,0 +1,17 @@
+.git
+.venv
+**/__pycache__
+**/.pytest_cache
+frontend/node_modules
+frontend/dist
+data/*.db
+data/*.db-journal
+data/uploads
+data/training
+data/model.pt
+backend/.env
+backend/.env.friends
+.env
+Intuit Prep
+htmlcov
+.coverage

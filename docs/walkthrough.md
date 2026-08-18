@@ -9,6 +9,8 @@ the tree live.
 |---|---|
 | `README.md` | Quick start, config table, still-to-do |
 | `docker-compose.yml` | API + web; optional `postgres` profile |
+| `Dockerfile` / `render.yaml` | One-URL friends deploy on Render |
+| `docs/hosting.md` | Render + Google checklist |
 | `data/` | SQLite DB (local), uploads, curated JSON |
 | `docs/` | ADRs, demo script, Q&A, Postgres, known issues, chat flow |
 | `backend/` | FastAPI app |

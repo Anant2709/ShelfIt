@@ -23,6 +23,8 @@ os.environ["MODEL_PATH"] = str(_TMP_ROOT / "model-that-does-not-exist.pt")
 os.environ["SHELF_LIFE_PATH"] = str(_TMP_ROOT / "no-shelf-life.json")
 os.environ["CATEGORIES_PATH"] = str(_TMP_ROOT / "no-categories.json")
 os.environ["RECIPES_PATH"] = str(_TMP_ROOT / "no-recipes.json")
+# A leftover frontend/dist on the laptop must not steal /api routes in tests.
+os.environ["STATIC_DIR"] = str(_TMP_ROOT / "no-frontend-dist")
 # Unset by default so no code path can reach OpenAI unless a test opts in.
 os.environ["OPENAI_API_KEY"] = ""
 

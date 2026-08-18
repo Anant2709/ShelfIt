@@ -59,14 +59,26 @@ def _frontend(path: str = "/", query: dict[str, str] | None = None) -> str:
     return url
 
 
+def _is_demo_identifier(login_id: str) -> bool:
+    ident = login_id.strip().lower()
+    return ident in {
+        settings.demo_email.strip().lower(),
+        settings.demo_username.strip().lower(),
+    }
+
+
 @router.get("/providers", response_model=AuthProvidersOut)
 def auth_providers():
     """What the sign-in page is allowed to offer.
 
     Google is absent until both client id and secret are configured, so a button
-    that cannot complete the flow is never shown.
+    that cannot complete the flow is never shown. The demo kitchen is a local
+    interview shortcut and is advertised only when explicitly enabled.
     """
-    return AuthProvidersOut(google=google_is_configured())
+    return AuthProvidersOut(
+        google=google_is_configured(),
+        demo=settings.enable_demo_login,
+    )
 
 
 @router.post("/register", response_model=UserOut)
@@ -91,19 +103,19 @@ def register(
 
 @router.post("/login", response_model=UserOut)
 def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)):
+    if not settings.enable_demo_login and _is_demo_identifier(payload.login_id):
+        # Same 401 as a bad password so the published demo login cannot be
+        # probed on a friends deploy.
+        raise HTTPException(status_code=401, detail="Invalid username or password")
     user = authenticate(db, payload.login_id, payload.password)
-    if user is None:
-        ident = payload.login_id.strip().lower()
-        demo_ids = {
-            settings.demo_email.strip().lower(),
-            settings.demo_username.strip().lower(),
-        }
-        if ident in demo_ids:
-            # Register is 8+ characters; the published demo password is not.
-            # Restoring the hash here means juhi / shelfit keeps working even
-            # if something else rewrote the demo row.
-            ensure_demo_user(db)
-            user = authenticate(db, payload.login_id, payload.password)
+    if user is None and settings.enable_demo_login and _is_demo_identifier(
+        payload.login_id
+    ):
+        # Register is 8+ characters; the published demo password is not.
+        # Restoring the hash here means juhi / shelfit keeps working even
+        # if something else rewrote the demo row.
+        ensure_demo_user(db)
+        user = authenticate(db, payload.login_id, payload.password)
     if user is None:
         # Same message for a missing account, a Google-only account, and a wrong
         # password, so a guess cannot tell which of the three it hit.

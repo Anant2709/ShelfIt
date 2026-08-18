@@ -85,6 +85,8 @@ be started.
 Hosted Postgres (Neon/Supabase) is supported via `DATABASE_URL` — see
 [`docs/postgres.md`](docs/postgres.md). Copy `backend/.env.example` to
 `backend/.env` for the full list of keys (including optional `EXA_API_KEY`).
+Friends can use a public Render URL; that path is
+[`docs/hosting.md`](docs/hosting.md).
 
 Interview docs live under [`docs/`](docs/): [ADRs](docs/adrs.md),
 [demo script](docs/demo-script.md), [Q&A](docs/interview-qa.md),
@@ -158,6 +160,8 @@ Set in `backend/.env` or the environment.
 | `GOOGLE_CLIENT_SECRET` | — | Server-side exchange; never sent to the browser |
 | `GOOGLE_REDIRECT_URI` | `http://localhost:8000/api/auth/google/callback` | Must match the Cloud Console redirect |
 | `FRONTEND_URL` | `http://localhost:5173` | Where Google sends the browser after sign-in |
+| `ENABLE_DEMO_LOGIN` | `true` | Interview demo kitchen; `false` on the friends host |
+| `COOKIE_SECURE` | `false` | `true` behind HTTPS (Render sets this) |
 | `ROBOFLOW_API_KEY` / `ROBOFLOW_WORKSPACE` / `ROBOFLOW_PROJECT` / `ROBOFLOW_VERSION` | — | Training data source |
 
 ### How an expiry date is chosen

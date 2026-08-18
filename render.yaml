@@ -1,0 +1,26 @@
+# Blueprint: one web service, friends database, no demo kitchen.
+# Secrets are filled in the Render dashboard, never committed.
+
+services:
+  - type: web
+    name: shelfit
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: ENABLE_DEMO_LOGIN
+        value: "false"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: CLASSIFIER_BACKEND
+        value: vision_llm
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: EXA_API_KEY
+        sync: false

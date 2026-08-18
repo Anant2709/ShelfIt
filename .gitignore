@@ -1,6 +1,8 @@
 # Secrets
 backend/.env
+backend/.env.friends
 .env
+.env.friends
 
 # Databases
 *.db

@@ -29,6 +29,7 @@ class LoginRequest(BaseModel):
 
 class AuthProvidersOut(BaseModel):
     google: bool
+    demo: bool
 
 
 class UserOut(BaseModel):

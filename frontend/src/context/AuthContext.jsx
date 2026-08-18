@@ -13,6 +13,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [googleEnabled, setGoogleEnabled] = useState(false);
+  const [demoEnabled, setDemoEnabled] = useState(true);
   const [status, setStatus] = useState("");
 
   useEffect(() => {
@@ -23,8 +24,14 @@ export function AuthProvider({ children }) {
       window.history.replaceState({}, "", window.location.pathname);
     }
     authProviders()
-      .then((providers) => setGoogleEnabled(Boolean(providers.google)))
-      .catch(() => setGoogleEnabled(false));
+      .then((providers) => {
+        setGoogleEnabled(Boolean(providers.google));
+        setDemoEnabled(providers.demo !== false);
+      })
+      .catch(() => {
+        setGoogleEnabled(false);
+        setDemoEnabled(false);
+      });
     me()
       .then((account) => setUser(account))
       .catch(() => setUser(null))
@@ -64,6 +71,7 @@ export function AuthProvider({ children }) {
       user,
       authReady,
       googleEnabled,
+      demoEnabled,
       status,
       setStatus,
       login,
@@ -71,7 +79,7 @@ export function AuthProvider({ children }) {
       loginDemo,
       logout
     }),
-    [user, authReady, googleEnabled, status]
+    [user, authReady, googleEnabled, demoEnabled, status]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

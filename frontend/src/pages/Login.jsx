@@ -8,6 +8,7 @@ export default function Login() {
     user,
     authReady,
     googleEnabled,
+    demoEnabled,
     status,
     setStatus,
     login,
@@ -143,14 +144,16 @@ export default function Login() {
           </a>
         )}
 
-        <button
-          type="button"
-          className="ghost-button"
-          disabled={busy}
-          onClick={handleDemo}
-        >
-          Open the demo kitchen
-        </button>
+        {demoEnabled && (
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={busy}
+            onClick={handleDemo}
+          >
+            Open the demo kitchen
+          </button>
+        )}
 
         <button
           type="button"

@@ -27,7 +27,7 @@ export async function me() {
 export async function authProviders() {
   const res = await apiFetch(`${API_BASE}/auth/providers`);
   if (!res.ok) {
-    return { google: false };
+    return { google: false, demo: false };
   }
   return res.json();
 }

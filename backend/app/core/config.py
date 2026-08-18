@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -36,10 +37,16 @@ class Settings(BaseSettings):
     demo_username: str = "juhi"
     demo_password: str = "shelfit"
     demo_timezone: str = "America/New_York"
+    # Local interview button. Hosted friends deploys set this false.
+    enable_demo_login: bool = True
     frontend_url: str = "http://localhost:5173"
     google_client_id: str | None = None
     google_client_secret: str | None = None
     google_redirect_uri: str = "http://localhost:8000/api/auth/google/callback"
+    # Render injects this. Used to point cookies, CORS, and Google back at
+    # the one public URL without hard-coding the onrender hostname.
+    render_external_url: str | None = None
+    static_dir: str = str(BASE_DIR / "frontend" / "dist")
     model_path: str = str(DATA_DIR / "model.pt")
     model_confidence_threshold: float = 0.7
     # "vision_llm" recognises arbitrary groceries; "yolo" uses local weights and
@@ -57,6 +64,20 @@ class Settings(BaseSettings):
     roboflow_version: int | None = None
     # Optional Exa key for packaged-product nutrition when Open Food Facts misses.
     exa_api_key: str | None = None
+
+    @model_validator(mode="after")
+    def apply_render_public_url(self):
+        origin = (self.render_external_url or "").rstrip("/")
+        if not origin:
+            return self
+        if "localhost" in self.frontend_url:
+            self.frontend_url = origin
+        if "localhost" in self.cors_origins:
+            self.cors_origins = origin
+        if "localhost" in self.google_redirect_uri:
+            self.google_redirect_uri = f"{origin}/api/auth/google/callback"
+        self.cookie_secure = True
+        return self
 
 
 settings = Settings()
