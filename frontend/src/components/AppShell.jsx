@@ -90,10 +90,11 @@ export default function AppShell() {
   return (
     <div className="shell">
       <aside className="rail" aria-label="Main">
-        <NavLink to="/" end className="rail-brand" aria-label="Shelf It">
-          <img src="/icon-192.png" alt="" width="56" height="56" />
-        </NavLink>
-        <nav className="rail-nav">
+        <div className="rail-sticky">
+          <NavLink to="/" end className="rail-brand" aria-label="Shelf It">
+            <img src="/icon-192.png" alt="" width="56" height="56" />
+          </NavLink>
+          <nav className="rail-nav">
           {NAV.map((item) => (
             <NavLink
               key={item.to}
@@ -116,6 +117,7 @@ export default function AppShell() {
             </NavLink>
           ))}
         </nav>
+        </div>
       </aside>
 
       <div className="shell-main">
