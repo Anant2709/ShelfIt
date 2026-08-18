@@ -22,6 +22,13 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body {
   font-family: "Inter", system-ui, -apple-system, sans-serif;
   margin: 0;
@@ -63,6 +70,8 @@ textarea {
   gap: 16px;
   padding: 24px 20px 40px;
   max-width: 960px;
+  width: 100%;
+  min-width: 0;
 }
 
 .page-header {
@@ -100,6 +109,7 @@ textarea {
   box-shadow: var(--shadow);
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 .card h2,
@@ -121,6 +131,18 @@ textarea {
   border: 1px solid var(--line);
   background: #fff;
   color: var(--ink);
+  max-width: 100%;
+  min-width: 0;
+}
+
+.card input,
+.card textarea,
+.card select,
+.wizard-step input,
+.wizard-step select,
+.diet-weigh input,
+.auth-card input {
+  width: 100%;
 }
 
 .card button,
@@ -365,8 +387,14 @@ textarea {
 
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+}
+
+@media (min-width: 560px) {
+  .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .form-grid label,
@@ -894,8 +922,8 @@ textarea {
 
 @media (max-width: 860px) {
   .shell {
-    grid-template-columns: 1fr;
-    padding-bottom: var(--bottom-height);
+    grid-template-columns: minmax(0, 1fr);
+    padding-bottom: calc(var(--bottom-height) + env(safe-area-inset-bottom));
   }
 
   .rail {
@@ -904,16 +932,18 @@ textarea {
 
   .bottom-nav {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
-    height: var(--bottom-height);
+    width: 100%;
+    height: calc(var(--bottom-height) + env(safe-area-inset-bottom));
     background: var(--charcoal);
     color: #fff;
-    z-index: 20;
-    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+    z-index: 30;
+    padding: 8px 6px calc(8px + env(safe-area-inset-bottom));
+    box-shadow: 0 -8px 24px rgba(43, 43, 43, 0.12);
   }
 
   .bottom-link {
@@ -922,6 +952,7 @@ textarea {
     align-items: center;
     justify-content: center;
     gap: 2px;
+    min-width: 0;
     color: rgba(255, 255, 255, 0.65);
     text-decoration: none;
     font-size: 0.65rem;
@@ -933,13 +964,12 @@ textarea {
   }
 
   .bottom-link-scan .rail-icon {
-    width: 48px;
-    height: 48px;
+    width: 36px;
+    height: 36px;
     background: var(--peach);
     color: var(--charcoal);
     border-radius: 50%;
     padding: 0;
-    margin-top: -18px;
   }
 
   .chat-layout {
