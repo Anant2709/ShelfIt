@@ -397,14 +397,22 @@ textarea {
 }
 
 .google-button {
-  display: block;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   padding: 11px 14px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: #fff;
   color: var(--ink);
   text-decoration: none;
+}
+
+.google-button-logo {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
 }
 
 .google-button:hover {
