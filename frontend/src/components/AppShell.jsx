@@ -90,7 +90,9 @@ export default function AppShell() {
   return (
     <div className="shell">
       <aside className="rail" aria-label="Main">
-        <div className="rail-brand">Shelf It</div>
+        <NavLink to="/" end className="rail-brand" aria-label="Shelf It">
+          <img src="/icon-192.png" alt="" width="56" height="56" />
+        </NavLink>
         <nav className="rail-nav">
           {NAV.map((item) => (
             <NavLink

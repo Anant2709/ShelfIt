@@ -292,11 +292,18 @@ textarea {
 }
 
 .rail-brand {
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-align: center;
-  opacity: 0.85;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.rail-brand img {
+  display: block;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  object-fit: cover;
 }
 
 .rail-nav {
