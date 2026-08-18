@@ -84,22 +84,24 @@ export default function Account() {
         <button type="button" onClick={enableNotifications}>
           Allow notifications
         </button>
-        <label className="diet-check">
-          <input
-            type="checkbox"
-            checked={prefs.expiry}
-            onChange={(event) => updatePref("expiry", event.target.checked)}
-          />
-          Expiry nudges
-        </label>
-        <label className="diet-check">
-          <input
-            type="checkbox"
-            checked={prefs.meals}
-            onChange={(event) => updatePref("meals", event.target.checked)}
-          />
-          Meal log nudges
-        </label>
+        <div className="reminder-toggles">
+          <label className="diet-check">
+            <input
+              type="checkbox"
+              checked={prefs.expiry}
+              onChange={(event) => updatePref("expiry", event.target.checked)}
+            />
+            Expiry nudges
+          </label>
+          <label className="diet-check">
+            <input
+              type="checkbox"
+              checked={prefs.meals}
+              onChange={(event) => updatePref("meals", event.target.checked)}
+            />
+            Meal log nudges
+          </label>
+        </div>
       </section>
     </div>
   );
