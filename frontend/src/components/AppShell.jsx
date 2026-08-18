@@ -1,6 +1,5 @@
 import React from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
 
 const NAV = [
   { to: "/", label: "Shelf", end: true, icon: "shelf" },
@@ -88,8 +87,6 @@ function NavIcon({ name }) {
 }
 
 export default function AppShell() {
-  const { status } = useAuth();
-
   return (
     <div className="shell">
       <aside className="rail" aria-label="Main">
@@ -120,7 +117,6 @@ export default function AppShell() {
       </aside>
 
       <div className="shell-main">
-        {status ? <div className="status toast">{status}</div> : null}
         <Outlet />
       </div>
 

@@ -54,6 +54,47 @@ class TestPackagedLabelParse:
         )
         assert label == PackagedLabel("Amul", "Toned Milk", 0.9)
 
+    def test_parses_a_printed_use_by_date(self):
+        from datetime import date
+
+        label = _parse_label(
+            {
+                "readable": True,
+                "brand": "Arya",
+                "product_name": "Dosa Batter",
+                "use_by": "2026-09-04",
+                "confidence": 0.9,
+            }
+        )
+        assert label.use_by == date(2026, 9, 4)
+
+    def test_accepts_expiration_date_as_a_use_by_alias(self):
+        from datetime import date
+
+        label = _parse_label(
+            {
+                "readable": True,
+                "brand": "Arya",
+                "product_name": "Dosa Batter",
+                "expiration_date": "2026-09-04",
+                "confidence": 0.9,
+            }
+        )
+        assert label.use_by == date(2026, 9, 4)
+
+    def test_ignores_unreadable_or_implausible_use_by_dates(self):
+        for raw in ("not-a-date", "1999-01-01", "4099-12-31", "", None):
+            label = _parse_label(
+                {
+                    "readable": True,
+                    "brand": "Arya",
+                    "product_name": "Dosa Batter",
+                    "use_by": raw,
+                    "confidence": 0.9,
+                }
+            )
+            assert label.use_by is None
+
     def test_skips_without_openai_key(self, monkeypatch, tmp_path):
         monkeypatch.setattr(
             "app.services.packaged_label.settings.openai_api_key", ""
@@ -85,6 +126,7 @@ class TestPackagedLabelParse:
                     "brand": "Cached",
                     "product_name": "Bar",
                     "confidence": 0.95,
+                    "use_by": "2026-09-04",
                 }
 
             def set(self, *args, **kwargs):
@@ -93,6 +135,7 @@ class TestPackagedLabelParse:
         label = read_packaged_label(path, cache=FakeCache())
         assert label.brand == "Cached"
         assert label.product_name == "Bar"
+        assert str(label.use_by) == "2026-09-04"
 
     def test_cached_negative(self, monkeypatch, tmp_path):
         monkeypatch.setattr(

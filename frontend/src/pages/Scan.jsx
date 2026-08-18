@@ -5,6 +5,8 @@ import { useAuth } from "../context/AuthContext";
 export default function Scan() {
   const { setStatus } = useAuth();
   const [file, setFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [busy, setBusy] = useState(false);
   const [expirationDate, setExpirationDate] = useState("");
   const [scanUnit, setScanUnit] = useState("count");
   const [scanQty, setScanQty] = useState(1);
@@ -12,6 +14,7 @@ export default function Scan() {
   const [labelInput, setLabelInput] = useState("");
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const fileInputRef = useRef(null);
   const [cameraOn, setCameraOn] = useState(false);
   const [manualName, setManualName] = useState("");
   const [manualQty, setManualQty] = useState(1);
@@ -37,6 +40,23 @@ export default function Scan() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl("");
+      return undefined;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  const clearPhoto = () => {
+    setFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
 
   const startCamera = async () => {
     try {
@@ -92,7 +112,7 @@ export default function Scan() {
       });
       setFile(capturedFile);
       stopCamera();
-      setStatus("Photo captured. Tap Scan & add.");
+      setStatus("Photo captured. Check the preview, then tap Scan & add.");
     }, "image/jpeg");
   };
 
@@ -101,6 +121,8 @@ export default function Scan() {
       setStatus("Select an image first.");
       return;
     }
+    if (busy) return;
+    setBusy(true);
     setStatus("Scanning...");
     try {
       const result = await scanItem(
@@ -109,7 +131,7 @@ export default function Scan() {
         scanUnit,
         scanQty
       );
-      setFile(null);
+      clearPhoto();
       if (result.status === "needs_label") {
         setPendingLabel({
           imageId: result.image_id,
@@ -132,9 +154,18 @@ export default function Scan() {
       setExpirationDate("");
       setScanUnit("count");
       setScanQty(1);
-      setStatus("Item scanned.");
+      const created = result.created_items || [];
+      if (result.status === "empty") {
+        setStatus("Nothing recognised in that photo. Try a closer shot.");
+      } else if (created.length === 1) {
+        setStatus(`Added ${created[0].name}.`);
+      } else {
+        setStatus(`Added ${created.length} items.`);
+      }
     } catch (err) {
       setStatus(err.message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -144,6 +175,8 @@ export default function Scan() {
       setStatus("Enter a label for the item.");
       return;
     }
+    if (busy) return;
+    setBusy(true);
     setStatus("Saving label...");
     try {
       await labelItem({
@@ -161,6 +194,8 @@ export default function Scan() {
       setStatus("Item labeled.");
     } catch (err) {
       setStatus(err.message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -169,6 +204,8 @@ export default function Scan() {
       setStatus("Enter an item name.");
       return;
     }
+    if (busy) return;
+    setBusy(true);
     setStatus("Adding item...");
     try {
       await addItem({
@@ -184,6 +221,8 @@ export default function Scan() {
       setStatus("Item added.");
     } catch (err) {
       setStatus(err.message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -199,8 +238,8 @@ export default function Scan() {
       <section className="card">
         <h2>Scan item</h2>
         <p className="hint">
-          Take a photo or upload one. The model names what it sees; low
-          confidence asks you to label.
+          Take a photo or upload one, check the preview, then scan. The model
+          names what it sees; low confidence asks you to label.
         </p>
 
         <div className="camera-actions">
@@ -233,12 +272,33 @@ export default function Scan() {
         <label>
           Or upload an image
           <input
+            ref={fileInputRef}
             type="file"
             accept="image/*"
             onChange={(event) => setFile(event.target.files?.[0] || null)}
           />
         </label>
-        {file ? <p className="hint">Selected: {file.name}</p> : null}
+        {previewUrl ? (
+          <div className="scan-preview">
+            <img src={previewUrl} alt="Selected grocery photo" />
+            <div className="scan-preview-meta">
+              <p className="hint">
+                Preview of {file?.name || "photo"}. If this is blurry or cropped,
+                retake it before scanning.
+              </p>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={clearPhoto}
+                disabled={busy}
+              >
+                Remove photo
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="hint">No photo selected yet.</p>
+        )}
 
         <div className="form-grid">
           <label>
@@ -274,8 +334,8 @@ export default function Scan() {
           </label>
         </div>
 
-        <button type="button" onClick={handleScan}>
-          Scan &amp; add
+        <button type="button" onClick={handleScan} disabled={busy || !file}>
+          {busy ? "Working..." : "Scan & add"}
         </button>
 
         {pendingLabel && (
@@ -292,7 +352,7 @@ export default function Scan() {
               value={labelInput}
               onChange={(event) => setLabelInput(event.target.value)}
             />
-            <button type="button" onClick={handleLabelSubmit}>
+            <button type="button" onClick={handleLabelSubmit} disabled={busy}>
               Save label
             </button>
           </div>
@@ -342,7 +402,7 @@ export default function Scan() {
             />
           </label>
         </div>
-        <button type="button" onClick={handleManualAdd}>
+        <button type="button" onClick={handleManualAdd} disabled={busy}>
           Add item
         </button>
       </section>

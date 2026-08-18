@@ -38,6 +38,12 @@ export function AuthProvider({ children }) {
       .finally(() => setAuthReady(true));
   }, []);
 
+  useEffect(() => {
+    if (!status || status.endsWith("...")) return undefined;
+    const timer = window.setTimeout(() => setStatus(""), 5000);
+    return () => window.clearTimeout(timer);
+  }, [status]);
+
   const login = async (identifier, password) => {
     const account = await apiLogin(identifier, password);
     setUser(account);

@@ -41,7 +41,9 @@ def infer_category(item: InventoryItem) -> None:
 
 
 def ensure_expiration(
-    db: Session, item: InventoryItem, expiration_date: date | None
+    db: Session, item: InventoryItem, expiration_date: date | None,
+    *,
+    date_source: str | None = None,
 ) -> None:
     """Attach an expiration row, inferring the date when none was supplied."""
     if expiration_date:
@@ -49,7 +51,7 @@ def ensure_expiration(
             Expiration(
                 item_id=item.id,
                 expiration_date=expiration_date,
-                source="user",
+                source=date_source or "user",
                 shelf_life_days=None,
             )
         )

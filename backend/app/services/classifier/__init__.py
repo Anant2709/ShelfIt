@@ -133,6 +133,26 @@ def reset_classifier() -> None:
     _classifier = None
 
 
+def collapse_duplicate_labels(detections: list[Detection]) -> list[Detection]:
+    """One row per name. The vision prompt already asks for that; models still
+    sometimes emit `dosa batter` twice for one pack, which used to create two
+    fridge rows. Different names (milk and bread) are kept.
+    """
+    best: dict[str, Detection] = {}
+    order: list[str] = []
+    for detection in detections:
+        key = detection.label.strip().lower()
+        if not key:
+            continue
+        if key not in best:
+            order.append(key)
+            best[key] = detection
+            continue
+        if detection.confidence > best[key].confidence:
+            best[key] = detection
+    return [best[key] for key in order]
+
+
 def detect_items(
     image_path: Path, classifier: Classifier | None = None
 ) -> list[Detection]:
@@ -140,7 +160,7 @@ def detect_items(
     active = classifier if classifier is not None else get_classifier()
     detections = active.detect(image_path)
     ranked = sorted(detections, key=lambda d: d.confidence, reverse=True)
-    return ranked[: settings.max_detections_per_image]
+    return collapse_duplicate_labels(ranked)[: settings.max_detections_per_image]
 
 
 def classify_image(

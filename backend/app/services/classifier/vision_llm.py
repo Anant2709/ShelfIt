@@ -26,7 +26,7 @@ from app.services.classifier import Detection
 
 # Bumping the version invalidates every cached detection, which is required
 # whenever the prompt or the parsing changes.
-CACHE_NAMESPACE = "vision_detect_v1"
+CACHE_NAMESPACE = "vision_detect_v2"
 
 PROMPT = """You identify grocery items in a photograph.
 
@@ -34,8 +34,8 @@ Return JSON of the form:
 {"items": [{"label": "milk", "confidence": 0.93}]}
 
 Rules:
-- One entry per distinct grocery item visible. If several identical items appear,
-  return a single entry.
+- If several identical items appear, return a single entry, not one per copy of the label.
+- If the photo is a single packaged product, return exactly one item.
 - "label" must be the common name of the food, lowercase, singular, with no brand
   and no packaging words. Prefer "milk" over "Amul Toned Milk 1L".
 - "confidence" is your certainty from 0.0 to 1.0 that the item is present and

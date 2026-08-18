@@ -51,6 +51,7 @@ from app.services.classifier import (
     UNKNOWN_LABEL,
     Detection,
     classify_image,
+    collapse_duplicate_labels,
     detect_items,
 )
 from app.services.urgency import (
@@ -424,13 +425,12 @@ def scan_item(
     user: User = Depends(get_current_user),
 ):
     file_path = _persist_upload(file)
-    detections = detect_items(file_path)
+    detections = collapse_duplicate_labels(detect_items(file_path))
 
     # Split on the confidence gate. Anything the model is sure about is added
     # directly; anything else is handed back for the user to confirm, so low
-    # confidence can never quietly corrupt the inventory. Partitioned in a single
-    # pass rather than by membership test, because two identical detections would
-    # otherwise both be treated as the same entry.
+    # confidence can never quietly corrupt the inventory. Identical names from
+    # one photo are already collapsed to a single row.
     confident: list[Detection] = []
     uncertain: list[Detection] = []
     for detection in detections:
@@ -447,6 +447,9 @@ def scan_item(
         nutrition = lookup_nutrition(
             brand=packaged.brand, product_name=packaged.product_name
         )
+    printed_use_by = (
+        packaged.use_by if packaged is not None and len(confident) == 1 else None
+    )
 
     for detection in confident:
         item = InventoryItem(
@@ -458,21 +461,27 @@ def scan_item(
             user_id=user.id,
             nutrition_source="none",
         )
-        if nutrition is not None:
-            item.brand = nutrition.brand or (packaged.brand if packaged else None)
-            item.product_name = nutrition.product_name or (
-                packaged.product_name if packaged else None
+        if packaged is not None and len(confident) == 1:
+            item.brand = (nutrition.brand if nutrition else None) or packaged.brand
+            item.product_name = (
+                (nutrition.product_name if nutrition else None) or packaged.product_name
             )
-            item.calories_kcal = nutrition.calories_kcal
-            item.protein_g = nutrition.protein_g
-            item.carbs_g = nutrition.carbs_g
-            item.fat_g = nutrition.fat_g
-            item.nutrition_source = nutrition.source
+            if nutrition is not None:
+                item.calories_kcal = nutrition.calories_kcal
+                item.protein_g = nutrition.protein_g
+                item.carbs_g = nutrition.carbs_g
+                item.fat_g = nutrition.fat_g
+                item.nutrition_source = nutrition.source
         infer_category(item)
         db.add(item)
         db.commit()
         db.refresh(item)
-        ensure_expiration(db, item, expiration_date)
+        ensure_expiration(
+            db,
+            item,
+            expiration_date or printed_use_by,
+            date_source="user" if expiration_date else ("label" if printed_use_by else None),
+        )
         db.refresh(item)
         created.append(item)
 

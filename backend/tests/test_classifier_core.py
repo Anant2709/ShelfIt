@@ -16,6 +16,7 @@ from app.services.classifier import (
     NullClassifier,
     build_classifier,
     classify_image,
+    collapse_duplicate_labels,
     detect_items,
     get_classifier,
     reset_classifier,
@@ -116,6 +117,18 @@ class TestDetectItems:
     def test_empty_result_is_an_empty_list(self):
         assert detect_items(Path("x.jpg"), classifier=FakeClassifier([])) == []
 
+    def test_collapses_the_same_name_to_one_detection(self):
+        backend = FakeClassifier(
+            [
+                Detection("dosa batter", 0.82),
+                Detection("Dosa Batter", 0.97),
+                Detection("bread", 0.91),
+            ]
+        )
+        detections = detect_items(Path("pack.jpg"), classifier=backend)
+        assert [d.label for d in detections] == ["Dosa Batter", "bread"]
+        assert detections[0].confidence == 0.97
+
     def test_passes_the_image_path_through(self):
         backend = FakeClassifier([])
         detect_items(Path("/tmp/photo.jpg"), classifier=backend)
@@ -128,6 +141,17 @@ class TestDetectItems:
             assert detect_items(Path("x.jpg")) == []
         finally:
             reset_classifier()
+
+
+class TestCollapseDuplicateLabels:
+    def test_keeps_distinct_names(self):
+        kept = collapse_duplicate_labels(
+            [Detection("milk", 0.9), Detection("bread", 0.8)]
+        )
+        assert [d.label for d in kept] == ["milk", "bread"]
+
+    def test_skips_blank_labels(self):
+        assert collapse_duplicate_labels([Detection("  ", 0.9)]) == []
 
 
 class TestClassifyImage:

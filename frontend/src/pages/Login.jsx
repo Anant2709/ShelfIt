@@ -9,7 +9,6 @@ export default function Login() {
     authReady,
     googleEnabled,
     demoEnabled,
-    status,
     setStatus,
     login,
     register,
@@ -92,7 +91,6 @@ export default function Login() {
 
       <form className="card auth-card" onSubmit={handleAuth}>
         <h2>{authMode === "login" ? "Sign in" : "Create an account"}</h2>
-        {status ? <div className="status">{status}</div> : null}
 
         <label>
           {authMode === "login" ? "Username or email" : "Username"}

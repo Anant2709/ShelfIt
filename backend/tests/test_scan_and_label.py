@@ -155,6 +155,50 @@ class TestScanPersistence:
         assert item["expiration"]["expiration_date"] == target
         assert item["expiration"]["source"] == "user"
 
+    def test_scan_uses_printed_use_by_when_the_form_is_empty(
+        self, client, uploads_dir, sample_image_bytes, stub_classifier, monkeypatch
+    ):
+        from app.services.packaged_label import PackagedLabel
+
+        stub_classifier("dosa batter", 0.95)
+        monkeypatch.setattr(
+            inventory_endpoint,
+            "read_packaged_label",
+            lambda path: PackagedLabel(
+                "Arya", "Dosa Batter", 0.91, use_by=date(2026, 9, 4)
+            ),
+        )
+        monkeypatch.setattr(
+            inventory_endpoint, "lookup_nutrition", lambda **kwargs: None
+        )
+        item = post_scan(client, sample_image_bytes).json()["item"]
+        assert item["expiration"]["expiration_date"] == "2026-09-04"
+        assert item["expiration"]["source"] == "label"
+        assert item["brand"] == "Arya"
+
+    def test_form_expiration_wins_over_printed_use_by(
+        self, client, uploads_dir, sample_image_bytes, stub_classifier, monkeypatch
+    ):
+        from app.services.packaged_label import PackagedLabel
+
+        stub_classifier("dosa batter", 0.95)
+        monkeypatch.setattr(
+            inventory_endpoint,
+            "read_packaged_label",
+            lambda path: PackagedLabel(
+                "Arya", "Dosa Batter", 0.91, use_by=date(2026, 9, 4)
+            ),
+        )
+        monkeypatch.setattr(
+            inventory_endpoint, "lookup_nutrition", lambda **kwargs: None
+        )
+        target = str(clock.today() + timedelta(days=3))
+        item = post_scan(
+            client, sample_image_bytes, expiration_date=target
+        ).json()["item"]
+        assert item["expiration"]["expiration_date"] == target
+        assert item["expiration"]["source"] == "user"
+
     def test_scan_requires_a_file(self, client):
         assert client.post("/api/inventory/scan", data={}).status_code == 422
 
@@ -256,14 +300,14 @@ class TestMultiItemScan:
         assert body["candidates"] == []
         assert db.query(InventoryItem).count() == 0
 
-    def test_duplicate_detections_create_separate_items(
+    def test_duplicate_detections_create_one_item(
         self, client, db, uploads_dir, sample_image_bytes, stub_classifier
     ):
-        """Two cartons of milk are two items, not one."""
-        stub_classifier(("milk", 0.95), ("milk", 0.95))
+        """One pack photographed twice by the model is still one fridge row."""
+        stub_classifier(("dosa batter", 0.95), ("dosa batter", 0.88))
         body = post_scan(client, sample_image_bytes).json()
-        assert len(body["created_items"]) == 2
-        assert db.query(InventoryItem).count() == 2
+        assert [item["name"] for item in body["created_items"]] == ["dosa batter"]
+        assert db.query(InventoryItem).count() == 1
 
     def test_bounding_boxes_are_surfaced_on_candidates(
         self, client, uploads_dir, sample_image_bytes, stub_classifier

@@ -202,8 +202,55 @@ textarea {
   color: var(--ink);
 }
 
-.status.toast {
-  margin: 16px 20px 0;
+.status-toast {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 80;
+  width: min(440px, calc(100% - 24px));
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--charcoal);
+  color: #fff;
+  box-shadow: 0 12px 32px rgba(43, 43, 43, 0.28);
+}
+
+.status-toast p {
+  margin: 0;
+  flex: 1;
+  line-height: 1.35;
+}
+
+.status-toast-close {
+  flex-shrink: 0;
+  width: auto !important;
+  padding: 6px 10px !important;
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: #fff !important;
+}
+
+.scan-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.scan-preview img {
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--cream-deep);
+}
+
+.scan-preview-meta {
+  display: grid;
+  gap: 8px;
 }
 
 .shell {

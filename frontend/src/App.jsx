@@ -2,6 +2,7 @@ import React, { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import AppShell from "./components/AppShell";
 import OfflineBanner from "./components/OfflineBanner";
+import StatusToast from "./components/StatusToast";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { getDietToday, getReminders } from "./api";
 import Account from "./pages/Account";
@@ -59,6 +60,7 @@ function ProtectedRoutes() {
 export default function App() {
   return (
     <AuthProvider>
+      <StatusToast />
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/*" element={<ProtectedRoutes />} />
