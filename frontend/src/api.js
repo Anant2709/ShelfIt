@@ -98,18 +98,19 @@ export async function scanItem(file, expirationDate, unit, quantity) {
   if (quantity) {
     formData.append("quantity", quantity);
   }
-  const res = await apiFetch(`${API_BASE}/inventory/scan/`, {
+  const res = await apiFetch(`${API_BASE}/inventory/scan`, {
     method: "POST",
     body: formData
   });
   if (!res.ok) {
-    throw new Error("Failed to scan item");
+    const payload = await res.json().catch(() => null);
+    throw new Error(errorFromResponse(payload, "Failed to scan item"));
   }
   return res.json();
 }
 
 export async function labelItem(payload) {
-  const res = await apiFetch(`${API_BASE}/inventory/label/`, {
+  const res = await apiFetch(`${API_BASE}/inventory/label`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -157,7 +158,7 @@ export async function setExpiration(itemId, expirationDate) {
 }
 
 export async function getReminders(days = 7) {
-  const res = await apiFetch(`${API_BASE}/inventory/reminders/?days=${days}`);
+  const res = await apiFetch(`${API_BASE}/inventory/reminders?days=${days}`);
   if (!res.ok) {
     throw new Error("Failed to fetch reminders");
   }

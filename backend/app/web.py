@@ -3,15 +3,22 @@
 Local development keeps Vite on :5173. A hosted one-URL deploy copies
 `frontend/dist` into `STATIC_DIR` and this module hands the browser those
 files so the session cookie stays first-party.
+
+A catch-all GET `/{path}` is the wrong tool here: FastAPI would then own
+that path for every method, so `POST /api/inventory/scan/` became 405
+instead of reaching the scanner. Unmatched GET pages fall through as 404
+and this module turns those into `index.html`.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import settings
 
@@ -32,6 +39,18 @@ def _safe_file(root: Path, full_path: str) -> Path | None:
     return None
 
 
+def _is_app_page(path: str) -> bool:
+    first = path.lstrip("/").split("/", 1)[0]
+    return first not in {
+        "api",
+        "health",
+        "docs",
+        "redoc",
+        "openapi.json",
+        "assets",
+    }
+
+
 def mount_frontend(app: FastAPI) -> None:
     root = _static_root()
     if root is None:
@@ -41,13 +60,14 @@ def mount_frontend(app: FastAPI) -> None:
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
 
-    @app.get("/{full_path:path}")
-    def spa(full_path: str):
-        # Trailing-slash API paths must 307/404, not return index.html.
-        first = full_path.split("/", 1)[0]
-        if first in {"api", "health", "docs", "redoc", "openapi.json"}:
-            raise HTTPException(status_code=404, detail="Not found")
-        existing = _safe_file(root, full_path)
-        if existing is not None:
-            return FileResponse(existing)
-        return FileResponse(root / "index.html")
+    @app.exception_handler(StarletteHTTPException)
+    async def spa_or_http_error(request: Request, exc: StarletteHTTPException):
+        path = request.url.path
+        if exc.status_code == 404 and request.method == "GET" and _is_app_page(path):
+            existing = _safe_file(root, path.lstrip("/"))
+            if existing is not None:
+                return FileResponse(existing)
+            return FileResponse(root / "index.html")
+        if isinstance(exc, HTTPException):
+            return await http_exception_handler(request, exc)
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)

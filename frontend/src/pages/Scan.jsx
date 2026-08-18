@@ -40,13 +40,28 @@ export default function Scan() {
 
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" }
-      });
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setStatus("This browser cannot open the camera. Upload a photo instead.");
+        return;
+      }
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } }
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      }
       streamRef.current = stream;
       setCameraOn(true);
+      setStatus("Camera on. Capture a photo, then tap Scan & add.");
     } catch (err) {
-      setStatus("Camera access denied or unavailable.");
+      const name = err && err.name ? err.name : "";
+      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        setStatus("Camera permission was denied. Allow the camera, or upload a photo.");
+      } else {
+        setStatus("Camera is unavailable. Upload a photo instead.");
+      }
     }
   };
 
@@ -77,6 +92,7 @@ export default function Scan() {
       });
       setFile(capturedFile);
       stopCamera();
+      setStatus("Photo captured. Tap Scan & add.");
     }, "image/jpeg");
   };
 

@@ -37,6 +37,24 @@ def test_spa_serves_index_and_real_files(tmp_path, monkeypatch):
     assert client.get("/api/inventory/reminders/").status_code == 404
 
 
+def test_spa_does_not_block_api_post_with_a_trailing_slash(tmp_path, monkeypatch):
+    (tmp_path / "index.html").write_text("<html>shelf</html>")
+    from app.core import config
+
+    monkeypatch.setattr(config.settings, "static_dir", str(tmp_path))
+    app = FastAPI()
+
+    @app.post("/api/inventory/scan")
+    def scan():
+        return {"ok": True}
+
+    mount_frontend(app)
+    client = TestClient(app)
+    assert client.post("/api/inventory/scan").json() == {"ok": True}
+    redirected = client.post("/api/inventory/scan/", follow_redirects=False)
+    assert redirected.status_code != 405
+
+
 def test_missing_dist_does_not_register_a_catch_all(monkeypatch, tmp_path):
     from app.core import config
 
