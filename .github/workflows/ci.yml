@@ -30,6 +30,8 @@ jobs:
 
       - name: Run tests
         run: pytest --cov=app --cov=scripts --cov-report=term-missing --cov-fail-under=95
+        env:
+          PYTHONPATH: .
 
   frontend:
     name: Frontend build
