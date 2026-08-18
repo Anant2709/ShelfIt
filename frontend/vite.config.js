@@ -31,9 +31,22 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: "/index.html",
+        // OAuth is a real navigation to /api/auth/google. Without this denylist
+        // the service worker serves index.html instead, so Continue with Google
+        // looks like a no-op on the login screen.
+        navigateFallbackDenylist: [
+          /^\/api\//,
+          /^\/health/,
+          /^\/docs/,
+          /^\/openapi\.json/,
+          /^\/redoc/
+        ],
         runtimeCaching: [
           {
-            urlPattern: ({ url }) => url.pathname.startsWith("/api/"),
+            urlPattern: ({ url, request }) =>
+              request.method === "GET" &&
+              url.pathname.startsWith("/api/") &&
+              !url.pathname.startsWith("/api/auth/google"),
             handler: "NetworkFirst",
             options: {
               cacheName: "shelfit-api",
