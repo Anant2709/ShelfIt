@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["icon-192.png", "icon-512.png", "manifest.json"],
+      includeAssets: ["icon-192.png", "icon-512.png", "apple-touch-icon.png", "manifest.json"],
       manifest: {
         name: "Shelf It",
         short_name: "ShelfIt",
@@ -20,12 +20,20 @@ export default defineConfig({
           {
             src: "/icon-192.png",
             sizes: "192x192",
-            type: "image/png"
+            type: "image/png",
+            purpose: "any"
           },
           {
             src: "/icon-512.png",
             sizes: "512x512",
-            type: "image/png"
+            type: "image/png",
+            purpose: "any"
+          },
+          {
+            src: "/icon-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable"
           }
         ]
       },
