@@ -157,7 +157,7 @@ class NameBreakdown:
 
 @dataclass(frozen=True)
 class CategoryBreakdown:
-    """Waste grouped by category. `category` is None for uncategorised items.
+    """Events grouped by category. `category` is None for uncategorised items.
 
     Counted in events only, with no quantity. Within a single name the unit is
     usually stable, but a category mixes litres of milk with grams of paneer, so
@@ -180,6 +180,7 @@ class WasteReport:
     wasted_undated: int
     by_name: tuple[NameBreakdown, ...]
     by_category: tuple[CategoryBreakdown, ...]
+    consumed_by_category: tuple[CategoryBreakdown, ...]
 
 
 def _totals(events: list[Disposition]) -> OutcomeTotals:
@@ -217,7 +218,7 @@ def _wasted_by_name(events: Iterable[Disposition]) -> tuple[NameBreakdown, ...]:
     return tuple(rows)
 
 
-def _wasted_by_category(
+def _events_by_category(
     events: Iterable[Disposition],
 ) -> tuple[CategoryBreakdown, ...]:
     grouped: dict[str | None, list[Disposition]] = defaultdict(list)
@@ -272,7 +273,8 @@ def summarise_waste(
         wasted_before_expiry=before,
         wasted_undated=undated,
         by_name=_wasted_by_name(wasted),
-        by_category=_wasted_by_category(wasted),
+        by_category=_events_by_category(wasted),
+        consumed_by_category=_events_by_category(consumed),
     )
 
 

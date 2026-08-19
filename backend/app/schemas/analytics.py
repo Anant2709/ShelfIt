@@ -39,3 +39,4 @@ class WasteReportOut(BaseModel):
     wasted_undated: int
     by_name: list[NameBreakdownOut] = Field(default_factory=list)
     by_category: list[CategoryBreakdownOut] = Field(default_factory=list)
+    consumed_by_category: list[CategoryBreakdownOut] = Field(default_factory=list)

@@ -772,18 +772,26 @@ class TestAnalyticsEndpoint:
         assert body["wasted_after_expiry"] == 1
         assert body["by_name"][0]["name"] == "Yogurt"
 
-    def test_report_groups_waste_by_category(self, client, db):
-        for name, category in [
-            ("Yogurt", "dairy"),
-            ("Paneer", "dairy"),
-            ("Lettuce", "produce"),
+    def test_report_groups_use_and_waste_by_category(self, client, db):
+        for name, category, outcome in [
+            ("Yogurt", "dairy", "wasted"),
+            ("Paneer", "dairy", "wasted"),
+            ("Lettuce", "produce", "wasted"),
+            ("Milk", "dairy", "consumed"),
+            ("Spinach", "produce", "consumed"),
+            ("Kale", "produce", "consumed"),
         ]:
             item = add_item(db, name=name, category=category, days_from_today=-1)
-            apply_disposition(db, item, "wasted")
+            apply_disposition(db, item, outcome)
         db.commit()
         body = client.get("/api/analytics/waste").json()
         assert body["by_category"][0] == {
             "category": "dairy",
+            "events": 2,
+            "items": 2,
+        }
+        assert body["consumed_by_category"][0] == {
+            "category": "produce",
             "events": 2,
             "items": 2,
         }

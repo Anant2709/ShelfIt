@@ -84,8 +84,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "quantity": {
                         "type": "number",
                         "description": (
-                            "How much, in the item's own unit. Omit to record the "
-                            "entire remaining amount."
+                            "How much, in the item's own unit. Pass this when the "
+                            "user names an amount (two tomatoes, 150g). Omit only "
+                            "to record the entire remaining amount."
                         ),
                     },
                     "reason": {

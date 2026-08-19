@@ -52,4 +52,10 @@ def get_waste_report(
             )
             for row in report.by_category
         ],
+        consumed_by_category=[
+            CategoryBreakdownOut(
+                category=row.category, events=row.events, items=row.items
+            )
+            for row in report.consumed_by_category
+        ],
     )

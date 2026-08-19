@@ -188,6 +188,14 @@ export async function recordDisposition(itemId, payload) {
   return res.json();
 }
 
+export async function getWasteReport(days = 30) {
+  const res = await apiFetch(`${API_BASE}/analytics/waste?days=${days}`);
+  if (!res.ok) {
+    throw new Error("Failed to load use and waste");
+  }
+  return res.json();
+}
+
 export async function undoDisposition(itemId, dispositionId) {
   const res = await apiFetch(
     `${API_BASE}/inventory/${itemId}/dispositions/${dispositionId}`,

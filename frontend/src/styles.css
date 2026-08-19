@@ -457,6 +457,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .edit-row {
@@ -466,7 +467,30 @@ textarea {
 .inventory-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.inventory-last-action {
+  margin-top: 8px;
+}
+
+.dispose-qty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.dispose-qty input {
+  width: 5.5rem;
+}
+
+.waste-chart {
+  margin-top: 12px;
+  max-width: 560px;
 }
 
 .form-grid {
