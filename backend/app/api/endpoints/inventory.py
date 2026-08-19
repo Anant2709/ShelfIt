@@ -54,6 +54,7 @@ from app.services.classifier import (
     collapse_duplicate_labels,
     detect_items,
 )
+from app.services.classifier.vision_llm import VisionClassificationError
 from app.services.urgency import (
     URGENCY_ORDER,
     Urgency,
@@ -425,7 +426,12 @@ def scan_item(
     user: User = Depends(get_current_user),
 ):
     file_path = _persist_upload(file)
-    detections = collapse_duplicate_labels(detect_items(file_path))
+    try:
+        detections = collapse_duplicate_labels(detect_items(file_path))
+    except VisionClassificationError as exc:
+        # OpenAI (or the vision backend) failed. 503 so the client can show the
+        # real sentence instead of a generic 500 / "Failed to scan item".
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     # Split on the confidence gate. Anything the model is sure about is added
     # directly; anything else is handed back for the user to confirm, so low
@@ -523,7 +529,10 @@ def upload_image(
 
     file_path = _persist_upload(file)
 
-    label, confidence = classify_image(file_path)
+    try:
+        label, confidence = classify_image(file_path)
+    except VisionClassificationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     item.image_uri = str(file_path)
     item.confidence = confidence
     if item.name == "unknown":

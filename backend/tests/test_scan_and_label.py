@@ -15,6 +15,7 @@ from app.api.endpoints import inventory as inventory_endpoint
 from app.core import config
 from app.models.inventory import InventoryItem
 from app.services.classifier import Detection
+from app.services.classifier.vision_llm import VisionClassificationError
 
 
 @pytest.fixture
@@ -71,6 +72,22 @@ class TestConfidenceGate:
         assert body["confidence"] == pytest.approx(0.42)
         assert body["item"] is None
         assert db.query(InventoryItem).count() == 0, "low confidence must not persist"
+
+    def test_vision_outage_returns_503_with_the_real_sentence(
+        self, client, sample_image_bytes, monkeypatch
+    ):
+        def _unavailable(_path):
+            raise VisionClassificationError(
+                "Image recognition is temporarily unavailable."
+            )
+
+        monkeypatch.setattr(inventory_endpoint, "detect_items", _unavailable)
+        response = post_scan(client, sample_image_bytes)
+        assert response.status_code == 503
+        assert (
+            response.json()["detail"]
+            == "Image recognition is temporarily unavailable."
+        )
 
     def test_confidence_above_threshold_creates_the_item(
         self, client, db, uploads_dir, sample_image_bytes, stub_classifier
